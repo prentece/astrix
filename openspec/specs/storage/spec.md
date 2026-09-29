@@ -1,0 +1,57 @@
+# Storage Specification
+
+## Purpose
+Manages the embedded SQLite database persistence layer, domain model schemas, transactions, migrations, and decoupled repository pattern implementations for projects, symbols, dependencies, and file states.
+
+## Requirements
+
+### Requirement: High-Performance SQLite Configuration
+The Storage layer SHALL initialize the local SQLite database (`~/.astrix/astrix.db`) with Write-Ahead Logging (WAL) and optimized concurrency pragmas.
+
+#### Scenario: Database connection initialization
+- **GIVEN** Astrix starts and creates the database connection via `NewDatabase`
+- **WHEN** the SQLite file is opened
+- **THEN** the system SHALL enable `_journal_mode=WAL` to allow non-blocking concurrent readers and writers
+- **AND** the system SHALL configure `_busy_timeout=5000` to wait up to 5 seconds before returning lock busy errors
+- **AND** the system SHALL enforce `_foreign_keys=ON` for relational integrity
+
+---
+
+### Requirement: Idempotent Automated Schema Migrations
+The Storage layer SHALL ensure that all required tables and indexes exist upon connection startup without requiring external migration tooling.
+
+#### Scenario: Running migrations on a fresh or existing database
+- **GIVEN** `NewDatabase(dbPath)` is called
+- **WHEN** `migrate()` executes
+- **THEN** the schema tables (`projects`, `symbols`, `dependency_graphs`, `data_models`, `file_states`) and their indexes SHALL be created idempotently using `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`
+
+---
+
+### Requirement: Relational Integrity and Cascade Deletion
+The Storage layer SHALL guarantee that deleting a project cascades to all child records automatically via foreign key constraints.
+
+#### Scenario: Project is deleted from database
+- **GIVEN** a project with ID `proj-123` has thousands of indexed symbols, edges, data models, and file states
+- **WHEN** `projectRepo.Delete("proj-123")` is executed
+- **THEN** SQLite foreign keys SHALL automatically delete all associated records in `symbols`, `dependency_graphs`, `data_models`, and `file_states` in a single transaction
+
+---
+
+### Requirement: Atomic Batch Symbol Persistence
+The Storage layer SHALL persist symbols and dependency edges in atomic transactions to guarantee consistency and performance.
+
+#### Scenario: Indexer saves thousands of symbols
+- **GIVEN** a batch of newly extracted symbols from an indexed project
+- **WHEN** `symbolRepo.SaveBatch(symbols)` is executed
+- **THEN** all symbols SHALL be inserted inside an explicit `BeginTx` transaction
+- **AND** if an error occurs during insertion, the transaction SHALL be rolled back completely
+
+---
+
+### Requirement: Dangling State Auto-Recovery
+The Storage layer SHALL recover projects that remained in the `indexing` status due to unexpected process termination.
+
+#### Scenario: System crashed during previous indexing run
+- **GIVEN** a project was left in `status = 'indexing'` when the process was killed
+- **WHEN** Astrix initializes via `Execute()` and calls `ResetDanglingIndexingStatus()`
+- **THEN** the project status SHALL be automatically reset to `pending` or `error` with a descriptive message

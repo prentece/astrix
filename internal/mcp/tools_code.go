@@ -1,0 +1,281 @@
+package mcp
+
+import (
+	"astrix/pkg/indexer"
+	"astrix/internal/service"
+	"context"
+	"fmt"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+// registerCodeTools registra as ferramentas de inteligência de código, AST e navegação.
+func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
+	// 1. Tool: lookup_symbol (merge de find_symbol + find_references)
+	lookupSymbolTool := mcp.NewTool("lookup_symbol",
+		mcp.WithDescription("AST symbol lookup and impact analysis. Use mode='definition' to locate declarations of classes, structs, interfaces, methods, functions across the repository. Use mode='references' to find callers and usage sites."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Check '.agents/skills/astrix/projects.md' first; fallback to list_projects if not found.")),
+		mcp.WithString("symbol_name", mcp.Required(), mcp.Description("The exact or partial name of the symbol (e.g. 'NewServer', 'UserService', 'HandleRequest').")),
+		mcp.WithString("mode", mcp.Required(), mcp.Description("Lookup mode: 'definition' (find where the symbol is declared/implemented) or 'references' (find all callers and usage sites across the repo).")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of results to return per page (optional, default 25, max 100).")),
+		mcp.WithNumber("offset", mcp.Description("Starting offset index for pagination (optional, default 0).")),
+		mcp.WithString("format", mcp.Description("Output format: 'text' (default, compact grep/ctags style) or 'json' (clean minimized JSON array).")),
+	)
+	s.AddTool(lookupSymbolTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID := getStringParam(req.Params.Arguments, "project_id")
+		if projectID == "" {
+			return mcp.NewToolResultError("Field 'project_id' is required"), nil
+		}
+
+		symbolName := getStringParam(req.Params.Arguments, "symbol_name")
+		if symbolName == "" {
+			return mcp.NewToolResultError("Field 'symbol_name' is required"), nil
+		}
+
+		mode := getStringParam(req.Params.Arguments, "mode")
+		if mode == "" {
+			return mcp.NewToolResultError("Field 'mode' is required: use 'definition' or 'references'"), nil
+		}
+		if mode != "definition" && mode != "references" {
+			return mcp.NewToolResultError("Field 'mode' must be 'definition' or 'references'"), nil
+		}
+
+		limit := getIntParam(req.Params.Arguments, "limit", 25)
+		if limit > 100 {
+			limit = 100
+		}
+
+		offset := getIntParam(req.Params.Arguments, "offset", 0)
+		format := getStringParam(req.Params.Arguments, "format")
+		asJSON := format == "json"
+
+		if mode == "definition" {
+			symbols, hasMore, err := codeService.FindSymbol(projectID, symbolName, limit, offset)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to find symbol definition: %v", err)), nil
+			}
+			return mcp.NewToolResultText(FormatSymbols(symbols, asJSON, limit, offset, hasMore)), nil
+		}
+
+		// mode == "references"
+		refs, hasMore, err := codeService.FindReferences(projectID, symbolName, limit, offset)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to find references: %v", err)), nil
+		}
+		result := FormatReferences(symbolName, refs, asJSON, limit, offset, hasMore)
+		if len(refs) == 0 {
+			result += "\n[HINT] No references found via AST index. For class-level symbols (types, interfaces), try grep_code as fallback: grep_code(pattern=\"<SymbolName>\")."
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// 2. Tool: get_implementation
+	getImplementationTool := mcp.NewTool("get_implementation",
+		mcp.WithDescription("Extracts the AST source code block of a function, method, struct, or class definition."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Check '.agents/skills/astrix/projects.md' first; fallback to list_projects if not found.")),
+		mcp.WithString("filepath", mcp.Required(), mcp.Description("Relative filepath where the symbol is declared (e.g. 'cmd/server/main.go').")),
+		mcp.WithString("symbol_name", mcp.Required(), mcp.Description("The name of the symbol whose implementation you want to retrieve.")),
+		mcp.WithString("format", mcp.Description("Output format: 'text' (default, raw code block) or 'json'.")),
+	)
+	s.AddTool(getImplementationTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID := getStringParam(req.Params.Arguments, "project_id")
+		if projectID == "" {
+			return mcp.NewToolResultError("Field 'project_id' is required"), nil
+		}
+
+		filePath := getStringParam(req.Params.Arguments, "filepath")
+		if filePath == "" {
+			filePath = getStringParam(req.Params.Arguments, "path")
+		}
+		if filePath == "" {
+			return mcp.NewToolResultError("Field 'filepath' is required"), nil
+		}
+
+		symbolName := getStringParam(req.Params.Arguments, "symbol_name")
+		if symbolName == "" {
+			return mcp.NewToolResultError("Field 'symbol_name' is required"), nil
+		}
+
+		format := getStringParam(req.Params.Arguments, "format")
+		asJSON := format == "json"
+
+		impl, err := codeService.GetImplementation(projectID, filePath, symbolName)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to get implementation: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(FormatImplementation(symbolName, filePath, impl, asJSON)), nil
+	})
+
+	// 3. Tool: read_file_lines
+	readFileLinesTool := mcp.NewTool("read_file_lines",
+		mcp.WithDescription("Reads and inspects code or text files within a specified line window, with enclosing symbol context and optional symbol anchor."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Check '.agents/skills/astrix/projects.md' first; fallback to list_projects if not found.")),
+		mcp.WithString("filepath", mcp.Required(), mcp.Description("Relative filepath to read (e.g. 'internal/web/handler.go').")),
+		mcp.WithString("path", mcp.Description("Alternative alias for filepath.")),
+		mcp.WithNumber("start_line", mcp.Description("1-indexed starting line number (optional, default 1). Ignored when anchor_symbol is provided.")),
+		mcp.WithNumber("end_line", mcp.Description("1-indexed ending line number (optional, default start_line + 49, max window 100 lines). Ignored when anchor_symbol is provided.")),
+		mcp.WithString("anchor_symbol", mcp.Description("Optional symbol name (function, class, struct) to auto-position the read window on its definition.")),
+		mcp.WithString("format", mcp.Description("Output format: 'text' (default, line window with context) or 'json'.")),
+	)
+	s.AddTool(readFileLinesTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID := getStringParam(req.Params.Arguments, "project_id")
+		if projectID == "" {
+			return mcp.NewToolResultError("Field 'project_id' is required"), nil
+		}
+
+		filePath := getStringParam(req.Params.Arguments, "filepath")
+		if filePath == "" {
+			filePath = getStringParam(req.Params.Arguments, "path")
+		}
+		if filePath == "" {
+			return mcp.NewToolResultError("Field 'filepath' is required"), nil
+		}
+
+		startLine := getIntParam(req.Params.Arguments, "start_line", 1)
+		endLine := getIntParam(req.Params.Arguments, "end_line", 0)
+		anchorSymbol := getStringParam(req.Params.Arguments, "anchor_symbol")
+		format := getStringParam(req.Params.Arguments, "format")
+		asJSON := format == "json"
+
+		content, err := codeService.PeekFile(projectID, filePath, startLine, endLine, anchorSymbol)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to read file lines: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(FormatPeekFile(filePath, startLine, endLine, anchorSymbol, content, asJSON)), nil
+	})
+
+	// 4. Tool: grep_code
+	grepTool := mcp.NewTool("grep_code",
+		mcp.WithDescription("Search for strings, patterns, or regex across the project respecting .gitignore. Supports case sensitivity, file extension filtering, and context lines."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Check '.agents/skills/astrix/projects.md' first; fallback to list_projects if not found.")),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regular expression or literal text string to search for across files.")),
+		mcp.WithString("path_prefix", mcp.Description("Optional subfolder path to limit the search scope (e.g. 'internal/web').")),
+		mcp.WithNumber("max_results", mcp.Description("Maximum number of matching lines to return per page (optional, default 30, max 100).")),
+		mcp.WithNumber("offset", mcp.Description("Starting match offset index for pagination (optional, default 0).")),
+		mcp.WithString("format", mcp.Description("Output format: 'text' (default, grep format) or 'json'.")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("If true, search is case-sensitive. Default is false (case-insensitive).")),
+		mcp.WithString("file_extensions", mcp.Description("Comma-separated list of file extensions to include (e.g. '.go,.ts,.py'). If empty, searches all text files.")),
+		mcp.WithNumber("context_lines", mcp.Description("Number of lines of context to include before and after each match (0-5, default 0).")),
+	)
+	s.AddTool(grepTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID := getStringParam(req.Params.Arguments, "project_id")
+		if projectID == "" {
+			return mcp.NewToolResultError("Field 'project_id' is required"), nil
+		}
+
+		pattern := getStringParam(req.Params.Arguments, "pattern")
+		if pattern == "" {
+			return mcp.NewToolResultError("Field 'pattern' is required"), nil
+		}
+
+		pathPrefix := getStringParam(req.Params.Arguments, "path_prefix")
+		maxResults := getIntParam(req.Params.Arguments, "max_results", 30)
+		if maxResults > 100 {
+			maxResults = 100
+		}
+
+		offset := getIntParam(req.Params.Arguments, "offset", 0)
+		format := getStringParam(req.Params.Arguments, "format")
+		asJSON := format == "json"
+
+		caseSensitive := getBoolParam(req.Params.Arguments, "case_sensitive", false)
+		contextLines := getIntParam(req.Params.Arguments, "context_lines", 0)
+		includeExts := getStringSliceParam(req.Params.Arguments, "file_extensions")
+
+		opts := indexer.GrepOptions{
+			CaseSensitive: caseSensitive,
+			IncludeExts:   includeExts,
+			ContextLines:  contextLines,
+		}
+
+		matches, hasMore, err := codeService.GrepCode(ctx, projectID, pattern, pathPrefix, maxResults, offset, opts)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to grep code: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(FormatGrepMatches(pattern, matches, asJSON, maxResults, offset, hasMore)), nil
+	})
+
+	// 5. Tool: query_structured_file
+	queryStructuredTool := mcp.NewTool("query_structured_file",
+		mcp.WithDescription("Inspect and query specific nodes in structured files (JSON, YAML, CSV). For JSON uses GJSON path (e.g. 'dependencies.@nestjs/core'), for YAML uses dot notation (e.g. 'services.postgres.ports'), for CSV uses filter expressions."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Check '.agents/skills/astrix/projects.md' first; fallback to list_projects if not found.")),
+		mcp.WithString("filepath", mcp.Required(), mcp.Description("Relative filepath to the structured file (e.g. 'package.json', 'docker-compose.yml', 'data.csv').")),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search path / filter query expression (JSON: GJSON path, YAML: dot-path, CSV: filter or columns).")),
+		mcp.WithString("format", mcp.Description("Output format: 'text' (default) or 'json'.")),
+	)
+	s.AddTool(queryStructuredTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID := getStringParam(req.Params.Arguments, "project_id")
+		if projectID == "" {
+			return mcp.NewToolResultError("Field 'project_id' is required"), nil
+		}
+
+		filePath := getStringParam(req.Params.Arguments, "filepath")
+		if filePath == "" {
+			filePath = getStringParam(req.Params.Arguments, "path")
+		}
+		if filePath == "" {
+			return mcp.NewToolResultError("Field 'filepath' is required"), nil
+		}
+
+		query := getStringParam(req.Params.Arguments, "query")
+		if query == "" {
+			return mcp.NewToolResultError("Field 'query' is required"), nil
+		}
+
+		format := getStringParam(req.Params.Arguments, "format")
+		asJSON := format == "json"
+
+		res, err := codeService.QueryStructuredFile(projectID, filePath, query)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to query structured file: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(FormatStructuredFileResult(filePath, query, res, asJSON)), nil
+	})
+
+	// 6. Tool: get_implementation_bundle
+	bundleTool := mcp.NewTool("get_implementation_bundle",
+		mcp.WithDescription("Fetches AST implementations of multiple symbols in a single call. Returns all results with partial error reporting for missing symbols."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Check '.agents/skills/astrix/projects.md' first; fallback to list_projects if not found.")),
+		mcp.WithString("symbols", mcp.Required(), mcp.Description("JSON array of symbol requests. Each item: {\"filepath\": \"relative/path.go\", \"symbol_name\": \"FunctionName\"}. Example: [{\"filepath\":\"internal/server.go\",\"symbol_name\":\"NewServer\"}]")),
+		mcp.WithString("format", mcp.Description("Output format: 'text' (default, sections separated by ### filepath :: symbol) or 'json'.")),
+	)
+	s.AddTool(bundleTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID := getStringParam(req.Params.Arguments, "project_id")
+		if projectID == "" {
+			return mcp.NewToolResultError("Field 'project_id' is required"), nil
+		}
+
+		symbolsRaw := getStringParam(req.Params.Arguments, "symbols")
+		if symbolsRaw == "" {
+			return mcp.NewToolResultError("Field 'symbols' is required"), nil
+		}
+
+		// Parse the JSON array of symbol requests
+		var rawItems []map[string]any
+		if err := parseJSON(symbolsRaw, &rawItems); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Field 'symbols' must be a valid JSON array: %v", err)), nil
+		}
+
+		reqs := make([]service.BundleRequest, 0, len(rawItems))
+		for _, item := range rawItems {
+			fp, _ := item["filepath"].(string)
+			sn, _ := item["symbol_name"].(string)
+			reqs = append(reqs, service.BundleRequest{Filepath: fp, SymbolName: sn})
+		}
+
+		format := getStringParam(req.Params.Arguments, "format")
+		asJSON := format == "json"
+
+		results, err := codeService.GetImplementationBundle(projectID, reqs)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Bundle failed: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(FormatImplementationBundle(results, asJSON)), nil
+	})
+}

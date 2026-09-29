@@ -1,0 +1,41 @@
+# Binários e builds
+/bin/
+/dist/
+archetype-data
+
+# Banco de dados e persistência SQLite
+/data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Arquivos temporários e de ambiente
+/tmp/
+.task/
+.env
+.env.local
+.env.*.local
+*.log
+build-errors.log
+
+# Referências locais e estudos que não devem subir
+/referencia/
+
+# IDEs e editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Diretórios de repositórios montados para teste local
+/repos/*
+!/repos/.gitkeep
+/TODO/
+
+#Astrix
+.astrix/
