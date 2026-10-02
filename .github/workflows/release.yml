@@ -126,6 +126,9 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Atualizar npm CLI para versão mais recente
+        run: npm install -g npm@latest
+
       - name: Obter Versão
         id: get_version
         shell: bash
@@ -142,7 +145,7 @@ jobs:
         with:
           path: dist-artifacts
 
-      - name: Preparar e Publicar Subpacotes de Plataforma
+      - name: Preparar e Estagiar Subpacotes de Plataforma
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
@@ -165,12 +168,12 @@ jobs:
             cd "$PKG_DIR"
             npm version "$VERSION" --no-git-tag-version --allow-same-version
             
-            # Publica subpacote via Trusted Publishing (ignora erro se já estiver publicado nesta versão)
-            npm publish --provenance --access public || echo "Subpacote $platform já publicado na versão $VERSION"
+            # Envia subpacote para Stage no npm
+            npm stage publish --provenance --access public || echo "Subpacote $platform já estagiado ou publicado na versão $VERSION"
             cd - > /dev/null
           done
 
-      - name: Preparar e Publicar Pacote Principal (@prentece/astrix)
+      - name: Preparar e Estagiar Pacote Principal (@prentece/astrix)
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
@@ -188,4 +191,4 @@ jobs:
             fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           '
           
-          npm publish --provenance --access public || echo "Pacote principal já publicado na versão $VERSION"
+          npm stage publish --provenance --access public || echo "Pacote principal já estagiado ou publicado na versão $VERSION"
