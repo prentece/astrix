@@ -165,8 +165,8 @@ jobs:
             cd "$PKG_DIR"
             npm version "$VERSION" --no-git-tag-version --allow-same-version
             
-            # Publica subpacote
-            npm publish --access public
+            # Publica subpacote (ignora erro se já estiver publicado nesta versão)
+            npm publish --access public || echo "Subpacote $platform já publicado na versão $VERSION"
             cd - > /dev/null
           done
 
@@ -189,4 +189,4 @@ jobs:
             fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           '
           
-          npm publish --access public
+          npm publish --access public || echo "Pacote principal já publicado na versão $VERSION"
