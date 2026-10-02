@@ -1,6 +1,7 @@
 # Binários e builds
 /bin/
 /dist/
+/npm/platforms/*/bin/
 archetype-data
 
 # Banco de dados e persistência SQLite

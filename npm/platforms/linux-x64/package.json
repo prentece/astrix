@@ -1,0 +1,23 @@
+{
+  "name": "@prentece/astrix-linux-x64",
+  "version": "0.1.0",
+  "description": "Astrix binary for Linux x64",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prentece/astrix.git"
+  },
+  "author": "prentece",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

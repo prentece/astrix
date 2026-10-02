@@ -113,6 +113,8 @@ func Execute() {
 		printErr(RunClean(projectService))
 	case "skills":
 		printErr(RunSkills(projectService))
+	case "version", "--version", "-v":
+		fmt.Printf("astrix v%s\n", Version)
 	case "help", "--help", "-h":
 		PrintHelp(projectRepo)
 	default:
@@ -154,6 +156,7 @@ func PrintHelp(projectRepo ...storage.ProjectRepository) {
 	fmt.Println()
 
 	fmt.Println("  " + cmdTitle.Render("Opções:"))
+	fmt.Println("    -v, --version  Exibe a versão instalada")
 	fmt.Println("    -h, --help     Exibe esta mensagem de ajuda")
 	fmt.Println()
 }

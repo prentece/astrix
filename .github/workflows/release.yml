@@ -1,0 +1,191 @@
+name: Release Astrix to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versão do release (ex: 0.1.0)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            goos: linux
+            goarch: amd64
+            binary_name: astrix
+            cgo_cc: gcc
+
+          - os: ubuntu-latest
+            platform: linux-arm64
+            goos: linux
+            goarch: arm64
+            binary_name: astrix
+            cgo_cc: aarch64-linux-gnu-gcc
+            cross_pkg: gcc-aarch64-linux-gnu
+
+          - os: macos-latest
+            platform: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            binary_name: astrix
+
+          - os: macos-13
+            platform: darwin-x64
+            goos: darwin
+            goarch: amd64
+            binary_name: astrix
+
+          - os: windows-latest
+            platform: win32-x64
+            goos: windows
+            goarch: amd64
+            binary_name: astrix.exe
+
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          check-latest: true
+          cache: true
+
+      - name: Instalar Cross-Compiler (Linux ARM64)
+        if: matrix.cross_pkg != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_pkg }}
+
+      - name: Setup GCC MinGW (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install mingw -y --no-progress
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" >> $env:GITHUB_PATH
+
+      - name: Obter Versão
+        id: get_version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${{ github.ref_name }}"
+            echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compilar Binário
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cgo_cc }}
+        run: |
+          mkdir -p dist/${{ matrix.platform }}
+          go build -tags "sqlite_foreign_keys" \
+            -ldflags "-s -w -X 'astrix/internal/cli.Version=${{ steps.get_version.outputs.VERSION }}'" \
+            -o dist/${{ matrix.platform }}/${{ matrix.binary_name }} \
+            ./cmd/astrix
+
+      - name: Upload Binário como Artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/${{ matrix.binary_name }}
+          retention-days: 1
+
+  publish-npm:
+    name: Publicar no npm Registry
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Obter Versão
+        id: get_version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${{ github.ref_name }}"
+            echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download de Todos os Binários
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Preparar e Publicar Subpacotes de Plataforma
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          PLATFORMS=("darwin-arm64" "darwin-x64" "linux-arm64" "linux-x64" "win32-x64")
+          
+          for platform in "${PLATFORMS[@]}"; do
+            echo "==> Processando plataforma: $platform"
+            PKG_DIR="npm/platforms/$platform"
+            mkdir -p "$PKG_DIR/bin"
+            
+            # Copia binário para a pasta bin do pacote
+            if [ "$platform" = "win32-x64" ]; then
+              cp dist-artifacts/binary-$platform/astrix.exe "$PKG_DIR/bin/"
+            else
+              cp dist-artifacts/binary-$platform/astrix "$PKG_DIR/bin/"
+              chmod +x "$PKG_DIR/bin/astrix"
+            fi
+            
+            # Atualiza versão no package.json
+            cd "$PKG_DIR"
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+            
+            # Publica subpacote
+            npm publish --access public
+            cd - > /dev/null
+          done
+
+      - name: Preparar e Publicar Pacote Principal (@prentece/astrix)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          cd npm/astrix
+          
+          # Atualiza versão do pacote principal e de suas dependências opcionais
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const version = process.env.VERSION;
+            pkg.version = version;
+            for (const key of Object.keys(pkg.optionalDependencies || {})) {
+              pkg.optionalDependencies[key] = version;
+            }
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
+          
+          npm publish --access public

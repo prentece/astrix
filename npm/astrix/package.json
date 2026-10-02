@@ -1,0 +1,41 @@
+{
+  "name": "@prentece/astrix",
+  "version": "0.1.0",
+  "description": "Astrix - Fast Code Intelligence & AST Engine for AI Coding Agents",
+  "bin": {
+    "astrix": "bin/astrix.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prentece/astrix.git"
+  },
+  "keywords": [
+    "astrix",
+    "ast",
+    "code-intelligence",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "tree-sitter",
+    "cli"
+  ],
+  "author": "prentece",
+  "license": "MIT",
+  "optionalDependencies": {
+    "@prentece/astrix-darwin-arm64": "0.1.0",
+    "@prentece/astrix-darwin-x64": "0.1.0",
+    "@prentece/astrix-linux-arm64": "0.1.0",
+    "@prentece/astrix-linux-x64": "0.1.0",
+    "@prentece/astrix-win32-x64": "0.1.0"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
