@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-binaries:
@@ -143,7 +144,6 @@ jobs:
 
       - name: Preparar e Publicar Subpacotes de Plataforma
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           PLATFORMS=("darwin-arm64" "darwin-x64" "linux-arm64" "linux-x64" "win32-x64")
@@ -165,14 +165,13 @@ jobs:
             cd "$PKG_DIR"
             npm version "$VERSION" --no-git-tag-version --allow-same-version
             
-            # Publica subpacote (ignora erro se já estiver publicado nesta versão)
-            npm publish --access public || echo "Subpacote $platform já publicado na versão $VERSION"
+            # Publica subpacote via Trusted Publishing (ignora erro se já estiver publicado nesta versão)
+            npm publish --provenance --access public || echo "Subpacote $platform já publicado na versão $VERSION"
             cd - > /dev/null
           done
 
       - name: Preparar e Publicar Pacote Principal (@prentece/astrix)
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           cd npm/astrix
@@ -189,4 +188,4 @@ jobs:
             fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           '
           
-          npm publish --access public || echo "Pacote principal já publicado na versão $VERSION"
+          npm publish --provenance --access public || echo "Pacote principal já publicado na versão $VERSION"
