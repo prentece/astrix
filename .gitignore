@@ -40,3 +40,6 @@ build-errors.log
 
 #Astrix
 .astrix/
+
+#Agents skills
+.agents/skills/**

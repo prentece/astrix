@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"astrix/internal/service"
 	"astrix/pkg/storage"
 	"encoding/json"
 	"fmt"
@@ -51,10 +52,19 @@ func DetectContext(dir string, projectRepo ...storage.ProjectRepository) (*Proje
 		return nil, fmt.Errorf("falha ao resolver caminho absoluto: %w", err)
 	}
 
+	detName, detLang := service.DetectProjectManifestInfo(absDir)
+	initialName := detName
+	if initialName == "" {
+		initialName = service.FormatProjectDisplayName(filepath.Base(absDir))
+	}
+	if detLang == "" || detLang == "auto" {
+		detLang = detectProjectLanguage(absDir)
+	}
+
 	ctx := &ProjectContext{
 		RootDir:      absDir,
-		Name:         filepath.Base(absDir),
-		DetectedLang: detectProjectLanguage(absDir),
+		Name:         initialName,
+		DetectedLang: detLang,
 	}
 
 	// 1. Verifica se é um diretório de projeto válido

@@ -81,11 +81,6 @@ func (s *ProjectService) SetAutoSync(id string, autoSync bool) error {
 func (s *ProjectService) RegisterProject(name, path, language string) (*storage.Project, error) {
 	name = strings.TrimSpace(name)
 	path = strings.TrimSpace(path)
-	language = strings.ToLower(strings.TrimSpace(language))
-
-	if name == "" {
-		return nil, errors.New("o campo 'name' é obrigatório")
-	}
 	if path == "" {
 		return nil, errors.New("o campo 'path' é obrigatório")
 	}
@@ -105,14 +100,17 @@ func (s *ProjectService) RegisterProject(name, path, language string) (*storage.
 	}
 
 	detName, detLang := DetectProjectManifestInfo(cleanPath)
-	if name == "" || strings.EqualFold(name, filepath.Base(cleanPath)) {
+	if name == "" {
 		if detName != "" {
 			name = detName
 		} else {
-			name = FormatProjectDisplayName(name)
+			name = FormatProjectDisplayName(filepath.Base(cleanPath))
 		}
 	} else {
 		name = FormatProjectDisplayName(name)
+	}
+	if name == "" {
+		return nil, errors.New("o campo 'name' é obrigatório")
 	}
 	if language == "" || language == "auto" {
 		if detLang != "" && detLang != "auto" {
@@ -144,9 +142,6 @@ func (s *ProjectService) RegisterProject(name, path, language string) (*storage.
 		return nil, fmt.Errorf("falha ao salvar projeto no banco: %w", err)
 	}
 
-	// Dispara indexação AST em segundo plano
-	s.engine.IndexProjectAsync(proj.ID)
-
 	// Registra no FileWatcher se ativo
 	if s.watcher != nil {
 		_ = s.watcher.WatchProject(proj)
@@ -155,7 +150,7 @@ func (s *ProjectService) RegisterProject(name, path, language string) (*storage.
 	return proj, nil
 }
 
-// ReindexProject força a sincronização incremental ou reindexação AST de um projeto.
+// ReindexProject força a sincronização incremental ou indexação completa de um projeto de forma síncrona.
 func (s *ProjectService) ReindexProject(id string) (*storage.Project, error) {
 	proj, err := s.projectRepo.GetByID(id)
 	if err != nil {
@@ -165,10 +160,19 @@ func (s *ProjectService) ReindexProject(id string) (*storage.Project, error) {
 		return nil, errors.New("projeto não encontrado")
 	}
 
-	go func() {
-		_, _ = s.engine.ProcessIncrementalDelta(id)
-	}()
-	return proj, nil
+	if s.engine != nil {
+		if proj.FileCount == 0 || proj.Status == storage.StatusPending {
+			if err := s.engine.IndexProject(id); err != nil {
+				return nil, err
+			}
+		} else {
+			if _, err := s.engine.ProcessIncrementalDelta(id); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return s.projectRepo.GetByID(id)
 }
 
 // GetIndexingProgress retorna o estado em tempo real da indexação ativa do projeto.

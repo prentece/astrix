@@ -86,7 +86,18 @@ func Execute() {
 
 		if ctx.IsProject && !ctx.IsRegistered {
 			// Projeto válido mas não cadastrado: dispara wizard interativo
-			printErr(RunWizard(projectService, ctx))
+			existing, _ := projectRepo.ListAll()
+			isFirstProject := len(existing) == 0
+
+			wizardErr := RunWizard(projectService, ctx)
+			printErr(wizardErr)
+
+			// Boas-vindas: no primeiro projeto cadastrado, abre o painel já pronto para uso
+			if wizardErr == nil && isFirstProject {
+				if newCtx, err := DetectContext(currDir, projectRepo); err == nil && newCtx.IsRegistered {
+					printErr(RunDashboard(projectService, codeService, fileWatcher, newCtx))
+				}
+			}
 			return
 		}
 

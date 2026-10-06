@@ -81,8 +81,8 @@ func RunWizard(projService *service.ProjectService, ctx *ProjectContext) error {
 			return fmt.Errorf("falha ao criar projeto: %w", err)
 		}
 
-		_ = SaveProjectConfig(ctx.RootDir, proj.ID, ctx.Name, ctx.DetectedLang)
-		_ = SetupSkills(ctx.RootDir, proj.ID, ctx.Name, selectedAgents)
+		_ = SaveProjectConfig(ctx.RootDir, proj.ID, proj.Name, proj.Language)
+		_ = SetupSkills(ctx.RootDir, proj.ID, proj.Name, selectedAgents)
 
 		indexed, err := projService.ReindexProject(proj.ID)
 		if err != nil {

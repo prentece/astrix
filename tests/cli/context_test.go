@@ -59,3 +59,35 @@ func TestCLI_ContextDetection(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, ctx.IsRegistered)
 }
+
+func TestCLI_ManifestNameDetection(t *testing.T) {
+	// 1. Projeto com package.json contendo "name": "nio" em uma pasta qualquer "fibra-frontend"
+	t.Run("uses manifest name when present", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "fibra-frontend-*")
+		require.NoError(t, err)
+		defer os.RemoveAll(tempDir)
+
+		_ = os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(`{"name": "Nio"}`), 0644)
+
+		ctx, err := cli.DetectContext(tempDir)
+		require.NoError(t, err)
+		assert.True(t, ctx.IsProject)
+		assert.Equal(t, "Nio", ctx.Name)
+		assert.Equal(t, "javascript", ctx.DetectedLang)
+	})
+
+	// 2. Projeto sem manifesto formata o nome da pasta
+	t.Run("formats folder name when no manifest name", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "minha-ferramenta-cli-*")
+		require.NoError(t, err)
+		defer os.RemoveAll(tempDir)
+
+		_ = os.WriteFile(filepath.Join(tempDir, ".git"), []byte(""), 0644)
+
+		ctx, err := cli.DetectContext(tempDir)
+		require.NoError(t, err)
+		assert.True(t, ctx.IsProject)
+		assert.Contains(t, ctx.Name, "Minha Ferramenta Cli")
+	})
+}
+

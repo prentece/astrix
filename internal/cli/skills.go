@@ -81,9 +81,19 @@ func GenerateSkill(rootDir, agentID, projectID, projectName string) (string, err
 		return "", fmt.Errorf("falha ao criar diretório para a skill: %w", err)
 	}
 
-	content := BuildSkillContent(agentID, projectID, projectName)
+	content := BuildSkillContent(agentID)
 	if err := os.WriteFile(destPath, []byte(content), 0644); err != nil {
 		return "", fmt.Errorf("falha ao gravar arquivo de skill em %s: %w", destPath, err)
+	}
+
+	if HasReferenceFile(agentID) {
+		refPath := filepath.Join(filepath.Dir(destPath), filepath.FromSlash(ReferenceRelPath))
+		if err := os.MkdirAll(filepath.Dir(refPath), 0755); err != nil {
+			return "", fmt.Errorf("falha ao criar diretório de references: %w", err)
+		}
+		if err := os.WriteFile(refPath, []byte(BuildReferenceContent()), 0644); err != nil {
+			return "", fmt.Errorf("falha ao gravar reference em %s: %w", refPath, err)
+		}
 	}
 
 	return destPath, nil
@@ -104,6 +114,11 @@ func RemoveSkills(rootDir string) ([]string, error) {
 	var removed []string
 	for _, target := range GetAvailableAgents() {
 		targetPath := filepath.Join(rootDir, target.FilePath)
+		if HasReferenceFile(target.ID) {
+			refPath := filepath.Join(filepath.Dir(targetPath), filepath.FromSlash(ReferenceRelPath))
+			_ = os.Remove(refPath)
+			_ = os.Remove(filepath.Dir(refPath))
+		}
 		if _, err := os.Stat(targetPath); err == nil {
 			if err := os.Remove(targetPath); err == nil {
 				removed = append(removed, target.FilePath)
@@ -151,63 +166,4 @@ func removeIfEmpty(dir string) {
 	}
 }
 
-// BuildSkillContent gera o texto de instrução Markdown formatado com parâmetros do projeto.
-func BuildSkillContent(agentID, projectID, projectName string) string {
-	var sb strings.Builder
 
-	if agentID == "antigravity" || agentID == "claude" {
-		sb.WriteString("---\n")
-		sb.WriteString("name: astrix\n")
-		sb.WriteString("description: Navegação e inspeção de código baseada em AST e índices estruturados com o Astrix MCP\n")
-		sb.WriteString(fmt.Sprintf("project_id: %q\n", projectID))
-		sb.WriteString("---\n\n")
-	} else if agentID == "cursor" {
-		sb.WriteString("---\n")
-		sb.WriteString("description: Diretrizes de navegação no projeto via Astrix MCP\n")
-		sb.WriteString("globs: *\n")
-		sb.WriteString("alwaysApply: true\n")
-		sb.WriteString("---\n\n")
-	}
-
-	sb.WriteString(fmt.Sprintf("# Astrix: %s\n\n", projectName))
-	sb.WriteString(fmt.Sprintf("Este projeto está indexado no **Astrix** sob o Project ID: `%s`.\n\n", projectID))
-	sb.WriteString("Ao inspecionar, navegar, debugar ou refatorar este código, utilize sempre o servidor MCP do Astrix com as ferramentas padronizadas abaixo:\n\n")
-	sb.WriteString("## Catálogo de Ferramentas MCP\n\n")
-
-	sb.WriteString("1. **`get_project_structure`**:\n")
-	sb.WriteString(fmt.Sprintf("   - Argumento: `{\"project_id\": %q}`\n", projectID))
-	sb.WriteString("   - Retorna a árvore hierárquica completa de arquivos suportados. Use para entender a topologia do projeto.\n\n")
-
-	sb.WriteString("2. **`lookup_symbol`**:\n")
-	sb.WriteString(fmt.Sprintf("   - Argumentos: `{\"project_id\": %q, \"symbol_name\": \"<Nome>\", \"mode\": \"definition|references\"}`\n", projectID))
-	sb.WriteString("   - Localiza declarações e referências de símbolos no código.\n\n")
-
-	sb.WriteString("3. **`get_implementation`**:\n")
-	sb.WriteString(fmt.Sprintf("   - Argumentos: `{\"project_id\": %q, \"filepath\": \"<caminho_relativo>\", \"symbol_name\": \"<Nome>\"}`\n", projectID))
-	sb.WriteString("   - Recupera a implementação exata de uma função, método, struct ou classe sem ler o arquivo inteiro.\n\n")
-
-	sb.WriteString("4. **`get_implementation_bundle`**:\n")
-	sb.WriteString(fmt.Sprintf("   - Argumentos: `{\"project_id\": %q, \"symbols\": \"[{\\\"filepath\\\": \\\"...\\\", \\\"symbol_name\\\": \\\"...\\\"}]\"}`\n", projectID))
-	sb.WriteString("   - Recupera múltiplos símbolos simultaneamente em uma única requisição.\n\n")
-
-	sb.WriteString("5. **`read_file_lines`**:\n")
-	sb.WriteString(fmt.Sprintf("   - Argumentos: `{\"project_id\": %q, \"filepath\": \"<caminho_relativo>\", \"start_line\": 1, \"end_line\": 50}`\n", projectID))
-	sb.WriteString("   - Lê um bloco específico de linhas de um arquivo.\n\n")
-
-	sb.WriteString("6. **`grep_code`**:\n")
-	sb.WriteString(fmt.Sprintf("   - Argumentos: `{\"project_id\": %q, \"pattern\": \"<texto_ou_regex>\"}`\n", projectID))
-	sb.WriteString("   - Busca de ocorrências textuais ou expressões regulares no projeto.\n\n")
-
-	sb.WriteString("7. **`query_structured_file`**:\n")
-	sb.WriteString(fmt.Sprintf("   - Argumentos: `{\"project_id\": %q, \"filepath\": \"<caminho>\", \"query\": \"chave.subchave\"}`\n", projectID))
-	sb.WriteString("   - Consulta valores específicos em arquivos de configuração JSON, YAML ou CSV sem carregar o arquivo na íntegra.\n\n")
-
-	sb.WriteString("8. **`list_projects`**:\n")
-	sb.WriteString("   - Retorna todos os projetos registrados no catálogo do Astrix.\n\n")
-
-	sb.WriteString("## Boas Práticas\n")
-	sb.WriteString("- Prefira `lookup_symbol` e `get_implementation` a leituras indiscriminadas de arquivos inteiros.\n")
-	sb.WriteString("- Antes de refatorar ou renomear símbolos, utilize `lookup_symbol` com `mode=\"references\"` para análise de impacto.\n")
-
-	return sb.String()
-}
