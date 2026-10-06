@@ -1,13 +1,10 @@
 package indexer
 
 import (
-	"bytes"
 	"astrix/pkg/storage"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 // DeltaEngine gerencia a detecção híbrida de alterações em repositórios (Git + Stat Cache).
@@ -34,18 +31,17 @@ func (d *DeltaEngine) DetectDelta(projectID, projectPath string) (*storage.Delta
 	return d.detectViaStatCache(projectPath, cachedStates)
 }
 
-// detectViaGit executa `git status --porcelain -uall` validando contra o cache de indexação.
-func (d *DeltaEngine) detectViaGit(projectPath string, cachedStates map[string]*storage.ProjectFileState) (*storage.DeltaResult, error) {
-	cmd := exec.Command("git", "status", "--porcelain", "-uall")
-	cmd.Dir = projectPath
+// DetectDeltaForFiles verifica apenas os arquivos candidatos informados contra o cache de estados,
+// evitando escanear todo o repositório com filepath.Walk quando os caminhos alterados já são conhecidos.
+// Se candidateRelPaths estiver vazio, realiza o scan completo tradicional (fallback).
+func (d *DeltaEngine) DetectDeltaForFiles(projectID, projectPath string, candidateRelPaths []string) (*storage.DeltaResult, error) {
+	if len(candidateRelPaths) == 0 {
+		return d.DetectDelta(projectID, projectPath)
+	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git status falhou: %v (%s)", err, stderr.String())
+	cachedStates, err := d.fileStateRepo.ListByProject(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao recuperar estados em cache do projeto: %w", err)
 	}
 
 	result := &storage.DeltaResult{
@@ -53,79 +49,52 @@ func (d *DeltaEngine) detectViaGit(projectPath string, cachedStates map[string]*
 		AddedFiles:    []string{},
 		DeletedFiles:  []string{},
 		RenamedFiles:  make(map[string]string),
-		Strategy:      "git",
+		Strategy:      "event_stat",
 	}
 
-	lines := strings.Split(stdout.String(), "\n")
-	gitModifiedSet := make(map[string]bool)
+	seen := make(map[string]bool)
+	for _, relPath := range candidateRelPaths {
+		relPath = filepath.ToSlash(filepath.Clean(relPath))
+		if seen[relPath] || relPath == "." || relPath == "" {
+			continue
+		}
+		seen[relPath] = true
 
-	for _, line := range lines {
-		if len(line) < 3 {
+		absPath, err := SafeJoin(projectPath, relPath)
+		if err != nil {
 			continue
 		}
 
-		statusCode := line[:2]
-		rawPath := strings.TrimSpace(line[3:])
+		info, err := os.Stat(absPath)
+		state, exists := cachedStates[relPath]
 
-		// Tratar arquivos renomeados no git (ex: "R  old.go -> new.go" ou "R100 old.go -> new.go")
-		if strings.HasPrefix(statusCode, "R") || strings.Contains(rawPath, " -> ") {
-			parts := strings.Split(rawPath, " -> ")
-			if len(parts) == 2 {
-				oldPath := strings.Trim(strings.TrimSpace(parts[0]), "\"")
-				newPath := strings.Trim(strings.TrimSpace(parts[1]), "\"")
-				result.RenamedFiles[newPath] = oldPath
-				result.ModifiedFiles = append(result.ModifiedFiles, newPath)
-				result.DeletedFiles = append(result.DeletedFiles, oldPath)
-				gitModifiedSet[oldPath] = true
-				gitModifiedSet[newPath] = true
-				continue
-			}
-		}
-
-		filePath := strings.Trim(rawPath, "\"")
-		filePath = filepath.ToSlash(filePath)
-		gitModifiedSet[filePath] = true
-
-		if strings.Contains(statusCode, "D") {
-			if _, exists := cachedStates[filePath]; exists {
-				result.DeletedFiles = append(result.DeletedFiles, filePath)
-			}
-		} else {
-			absPath := filepath.Join(projectPath, filePath)
-			info, err := os.Stat(absPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					if _, exists := cachedStates[filePath]; exists {
-						result.DeletedFiles = append(result.DeletedFiles, filePath)
-					}
+		if err != nil {
+			if os.IsNotExist(err) {
+				if exists {
+					result.DeletedFiles = append(result.DeletedFiles, relPath)
 				}
-				continue
 			}
-
-			mtime := info.ModTime().Unix()
-			size := info.Size()
-			state, exists := cachedStates[filePath]
-
-			if !exists {
-				result.AddedFiles = append(result.AddedFiles, filePath)
-			} else if state.MTime != mtime || state.FileSize != size {
-				result.ModifiedFiles = append(result.ModifiedFiles, filePath)
-			} else {
-				result.UnchangedCount++
-			}
+			continue
 		}
-	}
 
-	// Arquivos no cache que não foram tocados pelo Git
-	for path := range cachedStates {
-		if !gitModifiedSet[path] {
-			// Verifica se o arquivo ainda existe no disco
-			absPath := filepath.Join(projectPath, path)
-			if _, err := os.Stat(absPath); os.IsNotExist(err) {
-				result.DeletedFiles = append(result.DeletedFiles, path)
-			} else {
-				result.UnchangedCount++
-			}
+		if info.IsDir() {
+			continue
+		}
+
+		// Checa se o arquivo é suportado pelas linguagens cadastradas
+		if _, ok := GetConfigByFilePath(relPath); !ok {
+			continue
+		}
+
+		mtime := info.ModTime().Unix()
+		size := info.Size()
+
+		if !exists {
+			result.AddedFiles = append(result.AddedFiles, relPath)
+		} else if state.MTime != mtime || state.FileSize != size {
+			result.ModifiedFiles = append(result.ModifiedFiles, relPath)
+		} else {
+			result.UnchangedCount++
 		}
 	}
 

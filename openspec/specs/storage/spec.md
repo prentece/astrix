@@ -72,6 +72,18 @@ Repository batch methods (`SaveSymbols`, `SaveReferences`, `SaveDependencies`, `
 
 ---
 
+### Requirement: Atomic Incremental Index Persistence
+The Storage layer SHALL expose `IncrementalApplier.ApplyIncrementalDelta(delta)` (implemented by `IndexStore`) to atomically apply deletions, insertions, and file state updates in a single transaction.
+
+#### Scenario: Incremental sync applies changes
+- **GIVEN** an `IncrementalIndexDelta` containing deleted files, modified files, newly parsed symbols, callers, dependencies, models, and file states
+- **WHEN** `ApplyIncrementalDelta` executes
+- **THEN** records of deleted and modified files SHALL be removed from `symbols`, `references_table`, `dependency_graph`, `data_models`, and `project_file_states`
+- **AND** newly extracted records and file states SHALL be inserted within the same `BeginTx` transaction
+- **AND** if any write fails, the entire transaction SHALL be rolled back completely
+
+---
+
 ### Requirement: Dangling State Auto-Recovery
 The Storage layer SHALL recover projects that remained in the `indexing` status due to unexpected process termination.
 

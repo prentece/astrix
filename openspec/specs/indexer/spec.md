@@ -50,6 +50,19 @@ The Indexer Engine SHALL compute structural dependency relationships between fil
 - **THEN** the engine SHALL persist directed edges (`source_file` -> `target_file`) in `dependency_graphs`
 - **AND** the engine SHALL compute centrality scores to identify core components and God Nodes
 
+#### Scenario: Disambiguating homonym target symbols
+- **GIVEN** an unresolved dependency edge with a target symbol defined in multiple files
+- **WHEN** target files are resolved via `ResolveTargetFiles`
+- **THEN** candidate files located in the same directory as `source_file` SHALL be prioritized over other directories
+- **AND** production code files SHALL be prioritized over test files (`_test.go`, `/tests/`)
+
+#### Scenario: Skipping centrality recalculation when digest is unchanged
+- **GIVEN** an incremental delta where no files were added or deleted
+- **AND** all modified files have identical `DigestHash` (only internal function body changes)
+- **WHEN** `ProcessIncrementalDelta` executes
+- **THEN** `CalculateProjectCentrality` and `ResolveTargetFiles` SHALL be skipped to preserve CPU and I/O resources
+- **AND** the project status SHALL remain `ready` with preserved centrality scores
+
 ---
 
 ### Requirement: Resilient Parsing with Error Recovery
@@ -71,6 +84,12 @@ The Indexer Engine SHALL distribute file parsing across a concurrent worker pool
 - **WHEN** `IndexProject` or `ReindexProject` is invoked
 - **THEN** the engine SHALL spawn `runtime.NumCPU()` worker goroutines to parse files concurrently
 - **AND** atomic progress updates SHALL be tracked in `progressMap` for clients to monitor
+
+#### Scenario: Incremental delta parallel parsing
+- **GIVEN** an incremental delta with multiple added or modified files
+- **WHEN** `ProcessIncrementalDelta` is invoked
+- **THEN** the engine SHALL distribute candidate files across a concurrent worker pool
+- **AND** each worker SHALL execute AST parsing and digest extraction in a single pass using cached Tree-sitter queries
 
 ---
 

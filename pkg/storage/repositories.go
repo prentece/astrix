@@ -36,6 +36,7 @@ type DependencyGraphRepository interface {
 	GetUpstreamEdges(projectID, symbol string) ([]*DependencyEdge, error)
 	GetAllEdges(projectID string) ([]*DependencyEdge, error)
 	UpdateTargetFiles(projectID string, symbolToFileMap map[string]string) error
+	ResolveTargetFiles(projectID string, symbols []*Symbol) error
 	DeleteByFile(projectID, file string) error
 	ClearProjectDependencies(projectID string) error
 }

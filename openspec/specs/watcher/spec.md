@@ -13,16 +13,28 @@ The File Watcher SHALL listen to filesystem mutation events (`Create`, `Write`, 
 - **WHEN** the developer or editor modifies and saves a file
 - **THEN** the watcher SHALL intercept the write event and route it to the project's debounce queue
 
+#### Scenario: Multiple projects with shared prefix or nested structures
+- **GIVEN** projects located at `/workspace/proj` and `/workspace/proj-other`, or nested `/workspace/proj/sub`
+- **WHEN** a filesystem event occurs
+- **THEN** the watcher SHALL identify the project using path containment boundaries (not raw string prefix)
+- **AND** if multiple projects match, it SHALL select the most specific (longest path) project
+
 ---
 
 ### Requirement: 1500ms Debounce Window for Burst I/O
-The File Watcher SHALL aggregate rapid consecutive filesystem events into a single delta reindexing operation.
+The File Watcher SHALL aggregate rapid consecutive filesystem events into a single delta reindexing operation without losing events arriving during ongoing synchronization.
 
 #### Scenario: Multiple rapid writes occur
 - **GIVEN** an editor or formatter writes to files multiple times within milliseconds
 - **WHEN** events are received by the watcher
 - **THEN** the debounce timer SHALL be reset upon each event
 - **AND** reindexing SHALL execute only after 1500ms of complete silence on the project
+
+#### Scenario: Events occur during an active synchronization
+- **GIVEN** a project is currently executing `TriggerSync` (`syncingMap[projectID] == true`)
+- **WHEN** new filesystem events arrive for that project
+- **THEN** the watcher SHALL mark the project as dirty during sync
+- **AND** once the active sync completes, the watcher SHALL automatically reschedule a debounced sync to process the newly arrived changes
 
 ---
 
@@ -38,21 +50,22 @@ The File Watcher SHALL immediately discard events on ignored files without perfo
 ---
 
 ### Requirement: Dynamic Recursive Directory Watch Attachment
-The File Watcher SHALL automatically attach watches to newly created subdirectories within watched repositories.
+The File Watcher SHALL automatically attach watches to newly created subdirectories (including nested directory trees) within watched repositories.
 
-#### Scenario: Developer creates a new directory
-- **GIVEN** a new folder is created inside a watched project
+#### Scenario: Developer creates a new directory or nested tree
+- **GIVEN** a new folder (or recursive tree such as `cmd/api`) is created inside a watched project
 - **WHEN** the watcher receives a `Create` event where `FileInfo.IsDir()` is true
 - **THEN** the watcher SHALL verify that the folder is not ignored
-- **AND** the watcher SHALL add the new directory to `fsnotify.Watcher` to monitor files inside it
+- **AND** the watcher SHALL recursively add all non-ignored directories to `fsnotify.Watcher` and register them in memory
 
 ---
 
 ### Requirement: Graceful Teardown and Resource Cleanup
 The File Watcher SHALL cleanly release operating system file descriptors and goroutines upon termination.
 
-#### Scenario: Watcher service shutdown
+#### Scenario: Watcher service shutdown or project unwatch
 - **GIVEN** Astrix is stopping or unwatching a project
 - **WHEN** `Close()` or `UnwatchProject(projectID)` is invoked
-- **THEN** the watcher SHALL cancel active debounce timers
-- **AND** the watcher SHALL remove watches from `fsnotify` and cancel the background context
+- **THEN** the watcher SHALL cancel active debounce timers and discard pending flags
+- **AND** the watcher SHALL remove watches from `fsnotify` using the in-memory registered directory list, even if the directory on disk was already deleted
+- **AND** background polling routines SHALL exit immediately when context is cancelled

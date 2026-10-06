@@ -155,3 +155,179 @@ func TestFileWatcher_IgnorePatterns(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, status["has_changes"].(bool))
 }
+
+func TestFileWatcher_PathResolutionAndPrefixCollision(t *testing.T) {
+	database, engine, tmpDir := setupTestWatcherEnv(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	watcherService, err := watcher.NewFileWatcherService(projectRepo, fileStateRepo, engine)
+	require.NoError(t, err)
+	defer watcherService.Stop()
+
+	watcherService.SetDebounceDuration(100 * time.Millisecond)
+
+	// Cria estrutura com nomes que compartilham prefixos
+	baseDir := filepath.Join(tmpDir, "work")
+	projMainDir := filepath.Join(baseDir, "myproject")
+	projSiblingDir := filepath.Join(baseDir, "myproject-other")
+	projNestedDir := filepath.Join(projMainDir, "submodule")
+
+	require.NoError(t, os.MkdirAll(projMainDir, 0o755))
+	require.NoError(t, os.MkdirAll(projSiblingDir, 0o755))
+	require.NoError(t, os.MkdirAll(projNestedDir, 0o755))
+
+	p1 := &storage.Project{ID: "p1", Name: "Main", Path: projMainDir, Language: "go", Status: storage.StatusReady}
+	p2 := &storage.Project{ID: "p2", Name: "Sibling", Path: projSiblingDir, Language: "go", Status: storage.StatusReady}
+	p3 := &storage.Project{ID: "p3", Name: "Nested", Path: projNestedDir, Language: "go", Status: storage.StatusReady}
+
+	require.NoError(t, projectRepo.Create(p1))
+	require.NoError(t, projectRepo.Create(p2))
+	require.NoError(t, projectRepo.Create(p3))
+
+	require.NoError(t, watcherService.WatchProject(p1))
+	require.NoError(t, watcherService.WatchProject(p2))
+	require.NoError(t, watcherService.WatchProject(p3))
+
+	watcherService.SetAutoSync("p1", false)
+	watcherService.SetAutoSync("p2", false)
+	watcherService.SetAutoSync("p3", false)
+
+	// Cria arquivo no sibling 'myproject-other/service.go'
+	siblingFile := filepath.Join(projSiblingDir, "service.go")
+	require.NoError(t, os.WriteFile(siblingFile, []byte("package sibling\nfunc Sib() {}\n"), 0o644))
+
+	// Aguarda e verifica que apenas p2 (Sibling) detectou alterações, não p1!
+	require.Eventually(t, func() bool {
+		st2, _ := watcherService.GetSyncStatus("p2")
+		return st2 != nil && st2["has_changes"].(bool)
+	}, 2*time.Second, 50*time.Millisecond)
+
+	st1, err := watcherService.GetSyncStatus("p1")
+	require.NoError(t, err)
+	assert.False(t, st1["has_changes"].(bool), "p1 não deve ser afetado por alterações em p2")
+
+	// Cria arquivo no nested 'myproject/submodule/inner.go'
+	nestedFile := filepath.Join(projNestedDir, "inner.go")
+	require.NoError(t, os.WriteFile(nestedFile, []byte("package nested\nfunc Inner() {}\n"), 0o644))
+
+	// O nested (p3) deve detectar a alteração por ter a correspondência mais específica
+	require.Eventually(t, func() bool {
+		st3, _ := watcherService.GetSyncStatus("p3")
+		return st3 != nil && st3["has_changes"].(bool)
+	}, 2*time.Second, 50*time.Millisecond)
+}
+
+func TestFileWatcher_DynamicSubdirectoryCreation(t *testing.T) {
+	database, engine, tmpDir := setupTestWatcherEnv(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	watcherService, err := watcher.NewFileWatcherService(projectRepo, fileStateRepo, engine)
+	require.NoError(t, err)
+	defer watcherService.Stop()
+
+	watcherService.SetDebounceDuration(100 * time.Millisecond)
+
+	repoDir := filepath.Join(tmpDir, "dyn_repo")
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+
+	proj := &storage.Project{ID: "dyn-proj", Name: "Dyn", Path: repoDir, Language: "go", Status: storage.StatusReady}
+	require.NoError(t, projectRepo.Create(proj))
+	require.NoError(t, watcherService.WatchProject(proj))
+	require.NoError(t, watcherService.Start())
+
+	// 1. Cria subpasta aninhada após o watch já estar ativo
+	nestedSubDir := filepath.Join(repoDir, "cmd", "api")
+	require.NoError(t, os.MkdirAll(nestedSubDir, 0o755))
+
+	// Dá tempo para o watcher registrar a nova pasta
+	time.Sleep(150 * time.Millisecond)
+
+	// 2. Cria arquivo dentro da subpasta recém-criada
+	apiFile := filepath.Join(nestedSubDir, "main.go")
+	require.NoError(t, os.WriteFile(apiFile, []byte("package main\nfunc RunApi() {}\n"), 0o644))
+
+	// Aguarda auto-sync indexar o símbolo criado dentro da subpasta dinâmica
+	symbolRepo := storage.NewSymbolRepo(database)
+	require.Eventually(t, func() bool {
+		syms, _, err := symbolRepo.FindSymbol(proj.ID, "RunApi", 10, 0)
+		return err == nil && len(syms) > 0
+	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func TestFileWatcher_UnwatchDeletedDirectory(t *testing.T) {
+	database, engine, tmpDir := setupTestWatcherEnv(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	watcherService, err := watcher.NewFileWatcherService(projectRepo, fileStateRepo, engine)
+	require.NoError(t, err)
+	defer watcherService.Stop()
+
+	repoDir := filepath.Join(tmpDir, "del_repo")
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+
+	proj := &storage.Project{ID: "del-proj", Name: "Del", Path: repoDir, Language: "go", Status: storage.StatusReady}
+	require.NoError(t, projectRepo.Create(proj))
+	require.NoError(t, watcherService.WatchProject(proj))
+
+	// Remove o diretório do disco antes de chamar UnwatchProject
+	require.NoError(t, os.RemoveAll(repoDir))
+
+	// UnwatchProject não deve entrar em pânico nem retornar erro
+	assert.NotPanics(t, func() {
+		watcherService.UnwatchProject(proj.ID)
+	})
+}
+
+func TestFileWatcher_DirtyRescheduledAfterSync(t *testing.T) {
+	database, engine, tmpDir := setupTestWatcherEnv(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	watcherService, err := watcher.NewFileWatcherService(projectRepo, fileStateRepo, engine)
+	require.NoError(t, err)
+	defer watcherService.Stop()
+
+	watcherService.SetDebounceDuration(80 * time.Millisecond)
+
+	repoDir := filepath.Join(tmpDir, "dirty_repo")
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+
+	f1 := filepath.Join(repoDir, "a.go")
+	require.NoError(t, os.WriteFile(f1, []byte("package main\nfunc A() {}\n"), 0o644))
+
+	proj := &storage.Project{ID: "dirty-proj", Name: "Dirty", Path: repoDir, Language: "go", Status: storage.StatusReady}
+	require.NoError(t, projectRepo.Create(proj))
+	require.NoError(t, watcherService.WatchProject(proj))
+	require.NoError(t, watcherService.Start())
+
+	// Sincroniza primeiro arquivo
+	_, err = watcherService.TriggerSync(proj.ID)
+	require.NoError(t, err)
+
+	// Cria segundo arquivo e terceiro em sequência rápida
+	f2 := filepath.Join(repoDir, "b.go")
+	require.NoError(t, os.WriteFile(f2, []byte("package main\nfunc B() {}\n"), 0o644))
+
+	symbolRepo := storage.NewSymbolRepo(database)
+	require.Eventually(t, func() bool {
+		syms, _, err := symbolRepo.FindSymbol(proj.ID, "B", 10, 0)
+		return err == nil && len(syms) > 0
+	}, 3*time.Second, 50*time.Millisecond)
+}
+
+

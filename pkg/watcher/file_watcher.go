@@ -28,12 +28,16 @@ type FileWatcherService struct {
 
 	mu              sync.RWMutex
 	watchedProjects map[string]*storage.Project // projectID -> Project
-	pathProjects    map[string]string          // canonical path -> projectID
-	autoSync        map[string]bool            // projectID -> bool (default true)
-	pendingDeltas   map[string]*storage.DeltaResult
-	syncingMap      map[string]bool
-	debounceTimers  map[string]*time.Timer
-	gitIgnores      map[string]*ignore.GitIgnore
+	pathProjects      map[string]string          // canonical path -> projectID
+	autoSync          map[string]bool            // projectID -> bool (default true)
+	pendingDeltas     map[string]*storage.DeltaResult
+	syncingMap        map[string]bool
+	dirtyDuringSync   map[string]bool
+	watchedDirs       map[string]map[string]bool // projectID -> set of directory paths
+	pendingEventPaths map[string]map[string]bool // projectID -> set of candidate relative paths
+	fallbackInterval  time.Duration
+	debounceTimers    map[string]*time.Timer
+	gitIgnores        map[string]*ignore.GitIgnore
 
 	ctx        context.Context
 	cancelFunc context.CancelFunc
@@ -53,21 +57,25 @@ func NewFileWatcherService(
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &FileWatcherService{
-		projectRepo:      projectRepo,
-		fileStateRepo:    fileStateRepo,
-		engine:           engine,
-		deltaEngine:      indexer.NewDeltaEngine(fileStateRepo),
-		watcher:          fsWatcher,
-		debounceDuration: 1500 * time.Millisecond,
-		watchedProjects:  make(map[string]*storage.Project),
-		pathProjects:     make(map[string]string),
-		autoSync:         make(map[string]bool),
-		pendingDeltas:    make(map[string]*storage.DeltaResult),
-		syncingMap:       make(map[string]bool),
-		debounceTimers:   make(map[string]*time.Timer),
-		gitIgnores:       make(map[string]*ignore.GitIgnore),
-		ctx:              ctx,
-		cancelFunc:       cancel,
+		projectRepo:       projectRepo,
+		fileStateRepo:     fileStateRepo,
+		engine:            engine,
+		deltaEngine:       indexer.NewDeltaEngine(fileStateRepo),
+		watcher:           fsWatcher,
+		debounceDuration:  1500 * time.Millisecond,
+		fallbackInterval:  30 * time.Second,
+		watchedProjects:   make(map[string]*storage.Project),
+		pathProjects:      make(map[string]string),
+		autoSync:          make(map[string]bool),
+		pendingDeltas:     make(map[string]*storage.DeltaResult),
+		syncingMap:        make(map[string]bool),
+		dirtyDuringSync:   make(map[string]bool),
+		watchedDirs:       make(map[string]map[string]bool),
+		pendingEventPaths: make(map[string]map[string]bool),
+		debounceTimers:    make(map[string]*time.Timer),
+		gitIgnores:        make(map[string]*ignore.GitIgnore),
+		ctx:               ctx,
+		cancelFunc:        cancel,
 	}, nil
 }
 
@@ -95,6 +103,16 @@ func (w *FileWatcherService) Start() error {
 // Stop desliga o watcher e cancela o contexto.
 func (w *FileWatcherService) Stop() {
 	w.cancelFunc()
+
+	w.mu.Lock()
+	for _, timer := range w.debounceTimers {
+		if timer != nil {
+			timer.Stop()
+		}
+	}
+	w.debounceTimers = make(map[string]*time.Timer)
+	w.mu.Unlock()
+
 	if w.watcher != nil {
 		_ = w.watcher.Close()
 	}
@@ -116,6 +134,7 @@ func (w *FileWatcherService) WatchProject(proj *storage.Project) error {
 	w.watchedProjects[proj.ID] = proj
 	w.pathProjects[cleanPath] = proj.ID
 	w.autoSync[proj.ID] = proj.AutoSync
+	w.watchedDirs[proj.ID] = make(map[string]bool)
 
 	// Carrega .gitignore se existir
 	gitignorePath := filepath.Join(cleanPath, ".gitignore")
@@ -143,6 +162,13 @@ func (w *FileWatcherService) WatchProject(proj *storage.Project) error {
 
 		if err := w.watcher.Add(path); err == nil {
 			addedDirs++
+			w.mu.Lock()
+			if dirSet, ok := w.watchedDirs[proj.ID]; ok {
+				dirSet[path] = true
+			}
+			w.mu.Unlock()
+		} else {
+			log.Printf("[WATCHER WARN] Falha ao adicionar diretório '%s' ao fsnotify: %v\n", path, err)
 		}
 		return nil
 	})
@@ -165,7 +191,15 @@ func (w *FileWatcherService) UnwatchProject(projectID string) {
 	delete(w.autoSync, projectID)
 	delete(w.pendingDeltas, projectID)
 	delete(w.syncingMap, projectID)
+	delete(w.dirtyDuringSync, projectID)
+	delete(w.pendingEventPaths, projectID)
 	delete(w.gitIgnores, projectID)
+
+	dirsToRemove := make([]string, 0, len(w.watchedDirs[projectID]))
+	for d := range w.watchedDirs[projectID] {
+		dirsToRemove = append(dirsToRemove, d)
+	}
+	delete(w.watchedDirs, projectID)
 
 	if timer, ok := w.debounceTimers[projectID]; ok {
 		timer.Stop()
@@ -173,13 +207,10 @@ func (w *FileWatcherService) UnwatchProject(projectID string) {
 	}
 	w.mu.Unlock()
 
-	// Remove diretórios do fsnotify
-	_ = filepath.Walk(proj.Path, func(path string, info os.FileInfo, err error) error {
-		if err == nil && info.IsDir() {
-			_ = w.watcher.Remove(path)
-		}
-		return nil
-	})
+	// Remove diretórios do fsnotify a partir do registro em memória (não falha se o disco foi alterado)
+	for _, dir := range dirsToRemove {
+		_ = w.watcher.Remove(dir)
+	}
 }
 
 // SetAutoSync altera a preferência de sincronização automática para um projeto e persiste no banco.
@@ -215,6 +246,15 @@ func (w *FileWatcherService) SetDebounceDuration(duration time.Duration) {
 	defer w.mu.Unlock()
 	if duration >= 100*time.Millisecond {
 		w.debounceDuration = duration
+	}
+}
+
+// SetFallbackInterval define o intervalo da varredura periódica em segundo plano.
+func (w *FileWatcherService) SetFallbackInterval(interval time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if interval >= 1*time.Second {
+		w.fallbackInterval = interval
 	}
 }
 
@@ -270,7 +310,7 @@ func (w *FileWatcherService) GetSyncStatus(projectID string) (map[string]any, er
 	return result, nil
 }
 
-// TriggerSync força a sincronização incremental (AST + LLM Summaries) imediatamente.
+// TriggerSync força a sincronização incremental (AST) imediatamente.
 func (w *FileWatcherService) TriggerSync(projectID string) (*storage.DeltaReport, error) {
 	w.mu.Lock()
 	if w.syncingMap[projectID] {
@@ -280,16 +320,27 @@ func (w *FileWatcherService) TriggerSync(projectID string) (*storage.DeltaReport
 	w.syncingMap[projectID] = true
 	w.mu.Unlock()
 
+	var syncErr error
 	defer func() {
 		w.mu.Lock()
 		w.syncingMap[projectID] = false
-		delete(w.pendingDeltas, projectID)
+		if syncErr == nil {
+			delete(w.pendingDeltas, projectID)
+		}
+		wasDirty := w.dirtyDuringSync[projectID]
+		delete(w.dirtyDuringSync, projectID)
 		w.mu.Unlock()
+
+		if wasDirty {
+			w.scheduleProjectDebounce(projectID)
+		}
 	}()
 
 	// Executa indexação incremental AST
 	report, err := w.engine.ProcessIncrementalDelta(projectID)
 	if err != nil {
+		syncErr = err
+		log.Printf("[WATCHER WARN] Falha na sincronização incremental do projeto %s: %v\n", projectID, err)
 		return nil, fmt.Errorf("erro na sincronização incremental: %w", err)
 	}
 
@@ -327,24 +378,92 @@ func (w *FileWatcherService) handleFsnotifyEvent(event fsnotify.Event) {
 		return
 	}
 
-	// Se for criação de novo diretório, adiciona ao fsnotify
-	if event.Has(fsnotify.Create) {
-		if info, err := os.Stat(eventPath); err == nil && info.IsDir() {
-			dirName := info.Name()
-			if !indexer.DefaultIgnoredDirs[dirName] && !strings.HasPrefix(dirName, ".") {
-				_ = w.watcher.Add(eventPath)
-			}
-		}
-	}
-
 	// Identifica o projeto ao qual o caminho pertence
 	projectID := w.findProjectForPath(eventPath)
 	if projectID == "" {
 		return
 	}
 
+	// Checa .gitignore do projeto se disponível
+	w.mu.RLock()
+	proj := w.watchedProjects[projectID]
+	w.mu.RUnlock()
+	if proj != nil {
+		rel, err := filepath.Rel(proj.Path, eventPath)
+		if err == nil && rel != "." && w.isIgnoredByGit(projectID, rel) {
+			return
+		}
+	}
+
+	// Se for criação de novo diretório, adiciona recursivamente ao fsnotify
+	if event.Has(fsnotify.Create) {
+		if info, err := os.Stat(eventPath); err == nil && info.IsDir() {
+			w.addDirectoryTree(projectID, eventPath)
+		}
+	}
+
+	// Se for remoção de diretório, desregistra do fsnotify e do mapa
+	if event.Has(fsnotify.Remove) {
+		w.mu.Lock()
+		if dirSet, ok := w.watchedDirs[projectID]; ok && dirSet[eventPath] {
+			delete(dirSet, eventPath)
+			_ = w.watcher.Remove(eventPath)
+		}
+		w.mu.Unlock()
+	}
+
+	w.mu.Lock()
+	if w.syncingMap[projectID] {
+		w.dirtyDuringSync[projectID] = true
+	}
+	// Armazena o caminho relativo do arquivo afetado para detecção focada O(k)
+	if rel, err := filepath.Rel(proj.Path, eventPath); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+		if pSet, ok := w.pendingEventPaths[projectID]; ok {
+			pSet[rel] = true
+		} else {
+			w.pendingEventPaths[projectID] = map[string]bool{rel: true}
+		}
+	}
+	w.mu.Unlock()
+
 	// Agenda debounce para o projeto
 	w.scheduleProjectDebounce(projectID)
+}
+
+func (w *FileWatcherService) addDirectoryTree(projectID, dirPath string) {
+	w.mu.RLock()
+	proj := w.watchedProjects[projectID]
+	w.mu.RUnlock()
+	if proj == nil {
+		return
+	}
+
+	_ = filepath.Walk(dirPath, func(path string, fileInfo os.FileInfo, walkErr error) error {
+		if walkErr != nil || !fileInfo.IsDir() {
+			return nil
+		}
+
+		dirName := fileInfo.Name()
+		if indexer.DefaultIgnoredDirs[dirName] || (strings.HasPrefix(dirName, ".") && dirName != ".") {
+			return filepath.SkipDir
+		}
+
+		rel, _ := filepath.Rel(proj.Path, path)
+		if rel != "." && w.isIgnoredByGit(projectID, rel) {
+			return filepath.SkipDir
+		}
+
+		if err := w.watcher.Add(path); err == nil {
+			w.mu.Lock()
+			if dirSet, ok := w.watchedDirs[projectID]; ok {
+				dirSet[path] = true
+			}
+			w.mu.Unlock()
+		} else {
+			log.Printf("[WATCHER WARN] Falha ao adicionar novo subdiretório '%s' ao fsnotify: %v\n", path, err)
+		}
+		return nil
+	})
 }
 
 // scheduleProjectDebounce reinicia o temporizador de debounce para agrupar alterações.
@@ -363,21 +482,42 @@ func (w *FileWatcherService) scheduleProjectDebounce(projectID string) {
 
 // processDebouncedChanges é executado quando o debounce expira.
 func (w *FileWatcherService) processDebouncedChanges(projectID string) {
-	w.mu.RLock()
+	if w.ctx.Err() != nil {
+		return
+	}
+
+	w.mu.Lock()
 	proj, exists := w.watchedProjects[projectID]
 	autoSyncVal, hasAutoSync := w.autoSync[projectID]
 	if !hasAutoSync {
 		autoSyncVal = true
 	}
 	isSyncing := w.syncingMap[projectID]
-	w.mu.RUnlock()
+	if isSyncing {
+		w.dirtyDuringSync[projectID] = true
+		w.mu.Unlock()
+		return
+	}
+	w.mu.Unlock()
 
-	if !exists || isSyncing {
+	if !exists {
 		return
 	}
 
-	// Detecta alterações reais através do DeltaEngine
-	delta, err := w.deltaEngine.DetectDelta(projectID, proj.Path)
+	// Coleta caminhos específicos acumulados durante o debounce para evitar varrer o disco inteiro
+	w.mu.Lock()
+	var candidateFiles []string
+	if pSet, ok := w.pendingEventPaths[projectID]; ok && len(pSet) > 0 {
+		candidateFiles = make([]string, 0, len(pSet))
+		for p := range pSet {
+			candidateFiles = append(candidateFiles, p)
+		}
+		w.pendingEventPaths[projectID] = make(map[string]bool)
+	}
+	w.mu.Unlock()
+
+	// Detecta alterações reais através do DeltaEngine de forma cirúrgica (event_stat) ou scan completo (fallback)
+	delta, err := w.deltaEngine.DetectDeltaForFiles(projectID, proj.Path, candidateFiles)
 	if err != nil {
 		log.Printf("[WATCHER WARN] Falha ao detectar delta para projeto %s: %v\n", proj.Name, err)
 		return
@@ -394,7 +534,9 @@ func (w *FileWatcherService) processDebouncedChanges(projectID string) {
 	if autoSyncVal {
 		log.Printf("[WATCHER AUTO-SYNC] Disparando auto-sincronização para '%s' (%d modificados, %d novos, %d removidos)\n",
 			proj.Name, len(delta.ModifiedFiles), len(delta.AddedFiles), len(delta.DeletedFiles))
-		_, _ = w.TriggerSync(projectID)
+		if _, err := w.TriggerSync(projectID); err != nil {
+			log.Printf("[WATCHER WARN] Auto-sincronização falhou para '%s': %v\n", proj.Name, err)
+		}
 	} else {
 		w.mu.Lock()
 		w.pendingDeltas[projectID] = delta
@@ -404,7 +546,11 @@ func (w *FileWatcherService) processDebouncedChanges(projectID string) {
 
 // fallbackDeltaTicker realiza varreduras periódicas leves em segundo plano para robustez total (WSL2/Docker).
 func (w *FileWatcherService) fallbackDeltaTicker() {
-	ticker := time.NewTicker(4 * time.Second)
+	interval := w.fallbackInterval
+	if interval < 1*time.Second {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -418,6 +564,10 @@ func (w *FileWatcherService) fallbackDeltaTicker() {
 }
 
 func (w *FileWatcherService) runFallbackScan() {
+	if w.ctx.Err() != nil {
+		return
+	}
+
 	w.mu.RLock()
 	projects := make([]*storage.Project, 0, len(w.watchedProjects))
 	for _, p := range w.watchedProjects {
@@ -428,6 +578,10 @@ func (w *FileWatcherService) runFallbackScan() {
 	w.mu.RUnlock()
 
 	for _, proj := range projects {
+		if w.ctx.Err() != nil {
+			return
+		}
+
 		delta, err := w.deltaEngine.DetectDelta(proj.ID, proj.Path)
 		if err != nil {
 			continue
@@ -440,17 +594,36 @@ func (w *FileWatcherService) runFallbackScan() {
 	}
 }
 
-// findProjectForPath descobre a qual projeto pertence um arquivo.
+// findProjectForPath descobre a qual projeto pertence um arquivo selecionando o prefixo mais específico.
 func (w *FileWatcherService) findProjectForPath(filePath string) string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	cleanFilePath := filepath.Clean(filePath)
+	bestMatchLen := -1
+	bestProjectID := ""
+
 	for projPath, projID := range w.pathProjects {
-		if strings.HasPrefix(filePath, projPath) {
-			return projID
+		cleanProjPath := filepath.Clean(projPath)
+		if isPathInsideOrEqual(cleanProjPath, cleanFilePath) {
+			if len(cleanProjPath) > bestMatchLen {
+				bestMatchLen = len(cleanProjPath)
+				bestProjectID = projID
+			}
 		}
 	}
-	return ""
+	return bestProjectID
+}
+
+func isPathInsideOrEqual(root, target string) bool {
+	if root == target {
+		return true
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // isIgnoredPath verifica se o arquivo é temporário ou pertence a pastas padrão ignoradas.
@@ -458,9 +631,6 @@ func (w *FileWatcherService) isIgnoredPath(p string) bool {
 	base := filepath.Base(p)
 
 	// Arquivos temporários de IDEs / SO
-	if strings.HasPrefix(base, ".") && !strings.HasPrefix(base, ".env") {
-		return true
-	}
 	if strings.HasSuffix(base, "~") || strings.HasSuffix(base, ".swp") || strings.HasSuffix(base, ".tmp") {
 		return true
 	}
