@@ -115,7 +115,7 @@ func Execute() {
 	case "serve", "server":
 		printErr(RunServe(projectService, codeService, fileWatcher))
 	case "config":
-		printErr(PrintMCPConfig(true))
+		printErr(PrintMCPConfigWithArgs(args[1:]))
 	case "mcp":
 		printErr(RunMCPCommand(args[1:], projectService, codeService, fileWatcher))
 	case "index", "reindex", "rebuild":
@@ -155,7 +155,7 @@ func PrintHelp(projectRepo ...storage.ProjectRepository) {
 	fmt.Println("  " + cmdTitle.Render("Comandos Globais:"))
 	fmt.Println("    (sem comando)  Abre o menu interativo com todas as ações disponíveis")
 	fmt.Println("    serve          Inicia o servidor MCP via transporte nativo STDIO")
-	fmt.Println("    config         Exibe o JSON de configuração MCP para editores/IA")
+	fmt.Println("    config         Exibe o JSON de configuração MCP (--absolute: caminho completo, --npx: via npx)")
 	fmt.Println("    ls             Lista todos os projetos cadastrados no banco")
 	fmt.Println("    status         Exibe o status dos serviços em background e projetos")
 	fmt.Println()
