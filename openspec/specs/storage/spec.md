@@ -48,6 +48,30 @@ The Storage layer SHALL persist symbols and dependency edges in atomic transacti
 
 ---
 
+### Requirement: Atomic Full Project Index Replacement
+The Storage layer SHALL expose `IndexReplacer.ReplaceProjectIndex(snapshot)` (implemented by `IndexStore`) to replace the entire index of a project in a single transaction.
+
+#### Scenario: Full reindex persists a new snapshot
+- **GIVEN** an `IndexSnapshot` containing symbols, references, dependency edges, data models, and (optionally) file states
+- **WHEN** `ReplaceProjectIndex` is executed
+- **THEN** the previous symbols, references, dependency edges, and data models of the project SHALL be deleted and the new data inserted within one `BeginTx` transaction
+- **AND** file states SHALL be replaced in the same transaction only when `ReplaceFileStates` is true
+
+#### Scenario: A write fails mid-replacement
+- **GIVEN** a project with an existing index
+- **WHEN** any step of `ReplaceProjectIndex` fails (e.g. a foreign key violation)
+- **THEN** the whole transaction SHALL be rolled back
+- **AND** the previous index SHALL remain fully intact and queryable
+
+#### Scenario: Invalid snapshot
+- **GIVEN** a `nil` snapshot or one without `ProjectID`
+- **WHEN** `ReplaceProjectIndex` is called
+- **THEN** it SHALL return an error without touching the database
+
+Repository batch methods (`SaveSymbols`, `SaveReferences`, `SaveDependencies`, `SaveDataModels`, `UpsertBatch`) SHALL share the same transaction-level insert helpers used by `ReplaceProjectIndex`.
+
+---
+
 ### Requirement: Dangling State Auto-Recovery
 The Storage layer SHALL recover projects that remained in the `indexing` status due to unexpected process termination.
 

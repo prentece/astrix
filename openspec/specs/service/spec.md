@@ -51,13 +51,24 @@ The Service layer SHALL route symbol search and reference discovery requests to 
 ---
 
 ### Requirement: Security Boundary and Path Traversal Protection
-The Service layer SHALL prevent path traversal vulnerabilities when reading files or extracting implementations.
+The Service layer SHALL prevent path traversal vulnerabilities when reading files, extracting implementations, searching, or listing directories. Enforcement is centralized in `indexer.SafeJoin(root, rel)`, which every client-supplied relative path (`filepath`, `path_prefix`, `sub_path`) MUST go through before touching the filesystem.
 
 #### Scenario: Client requests a file path with parent directory navigation
 - **GIVEN** a request with `filepath = "../../../etc/passwd"`
-- **WHEN** `CodeService.ReadFileLines` or `CodeService.GetImplementation` is called
+- **WHEN** `CodeService.ReadFileLines`, `CodeService.GetImplementation`, `CodeService.GrepCode` (via `path_prefix`), `CodeService.QueryStructuredFile`, or the directory tree builders are called
 - **THEN** the service SHALL resolve the target path against the project root directory
-- **AND** if the target path falls outside the project root, the service SHALL reject the request with a permission/security error
+- **AND** if the target path falls outside the project root, the service SHALL reject the request with an `ErrPathOutsideRoot` error without reading the file
+
+#### Scenario: Client requests a path that shares the root's textual prefix
+- **GIVEN** a project rooted at `/work/proj` and a sibling directory `/work/proj-other`
+- **WHEN** a request uses `filepath = "../proj-other/x"`
+- **THEN** the request SHALL be rejected (containment is checked by path relationship, not by string prefix)
+
+#### Scenario: Client requests a path through a symlink that escapes the root
+- **GIVEN** a symlink inside the project pointing to a directory outside the project root
+- **WHEN** a request targets the symlink or any (existing or non-existing) path beneath it
+- **THEN** the request SHALL be rejected after resolving symlinks of the deepest existing ancestor
+- **AND** paths that do not exist but remain inside the root SHALL be accepted so the caller reports the normal I/O error
 
 ---
 

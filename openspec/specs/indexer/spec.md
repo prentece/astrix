@@ -71,3 +71,31 @@ The Indexer Engine SHALL distribute file parsing across a concurrent worker pool
 - **WHEN** `IndexProject` or `ReindexProject` is invoked
 - **THEN** the engine SHALL spawn `runtime.NumCPU()` worker goroutines to parse files concurrently
 - **AND** atomic progress updates SHALL be tracked in `progressMap` for clients to monitor
+
+---
+
+### Requirement: Atomic Full Reindex Persistence
+The Indexer Engine SHALL persist the result of a full reindex without ever leaving the project with a partial or empty index.
+
+#### Scenario: Reindex with an atomic index replacer configured
+- **GIVEN** the engine has an `IndexReplacer` (set via `SetIndexReplacer`)
+- **WHEN** `IndexProject` finishes parsing all files
+- **THEN** the old index SHALL remain queryable during the whole parsing phase
+- **AND** clearing the old index and writing symbols, references, dependencies, data models, and file states SHALL happen in a single transaction
+- **AND** target-file resolution and centrality scoring SHALL run after that transaction as derived, recomputable data
+
+#### Scenario: Persistence fails
+- **GIVEN** the transactional write returns an error
+- **WHEN** `IndexProject` handles the failure
+- **THEN** the previous index SHALL remain intact
+- **AND** the project status SHALL be set to `error` with a descriptive message and the error SHALL be returned
+
+#### Scenario: No atomic replacer configured
+- **GIVEN** the engine has no `IndexReplacer`
+- **WHEN** `IndexProject` runs
+- **THEN** it SHALL fall back to per-repository operations, clearing the old index only after parsing completes (not atomic)
+
+---
+
+### Requirement: Project-Root Confinement for File Access
+The Indexer SHALL resolve every client-supplied relative path with `SafeJoin` and MUST NOT read or walk outside the project root, including through symlinks (see the Service specification for the observable behavior).
