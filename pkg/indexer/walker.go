@@ -109,7 +109,10 @@ func ScanRepository(rootDir string) ([]FileInfo, error) {
 
 // BuildDirectoryTree gera a árvore estruturada de arquivos a partir de um subcaminho relativo.
 func BuildDirectoryTree(rootDir, subPath string, maxDepth int) (*storage.FileNode, error) {
-	targetAbs := filepath.Join(rootDir, subPath)
+	targetAbs, err := SafeJoin(rootDir, subPath)
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(targetAbs)
 	if err != nil {
 		return nil, err
@@ -210,7 +213,10 @@ func BuildTreeText(rootDir, subPath string, maxDepth int, showHidden bool) (stri
 		maxDepth = 2
 	}
 
-	targetAbs := filepath.Join(rootDir, subPath)
+	targetAbs, err := SafeJoin(rootDir, subPath)
+	if err != nil {
+		return "", err
+	}
 	info, err := os.Stat(targetAbs)
 	if err != nil {
 		return "", err

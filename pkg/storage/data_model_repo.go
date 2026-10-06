@@ -41,6 +41,19 @@ func (r *DataModelRepo) SaveDataModels(projectID string, modelsList []*DataModel
 	}
 	defer tx.Rollback()
 
+	if err := insertDataModelsTx(tx, projectID, modelsList); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertDataModelsTx insere modelos de dados dentro de uma transação existente.
+func insertDataModelsTx(tx *sql.Tx, projectID string, modelsList []*DataModel) error {
+	if len(modelsList) == 0 {
+		return nil
+	}
+
 	stmt, err := tx.Prepare(`
 		INSERT INTO data_models (project_id, model_name, file, kind, line_number, serialized_fields, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -70,8 +83,7 @@ func (r *DataModelRepo) SaveDataModels(projectID string, modelsList []*DataModel
 			return err
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // GetDataModel busca a definição de um modelo de dados pelo nome no projeto.

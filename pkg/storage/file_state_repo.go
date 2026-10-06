@@ -100,6 +100,19 @@ func (r *SQLFileStateRepository) UpsertBatch(states []*ProjectFileState) error {
 	}
 	defer tx.Rollback()
 
+	if err := upsertFileStatesTx(tx, states); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// upsertFileStatesTx insere ou atualiza estados de arquivo dentro de uma transação existente.
+func upsertFileStatesTx(tx *sql.Tx, states []*ProjectFileState) error {
+	if len(states) == 0 {
+		return nil
+	}
+
 	query := `INSERT INTO project_file_states (project_id, filepath, mtime, file_size, content_hash, digest_hash, last_indexed_at)
 	          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	          ON CONFLICT(project_id, filepath) DO UPDATE SET
@@ -119,8 +132,7 @@ func (r *SQLFileStateRepository) UpsertBatch(states []*ProjectFileState) error {
 			return fmt.Errorf("erro ao inserir estado do arquivo %s no batch: %w", s.FilePath, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // Delete remove o estado de um único arquivo.

@@ -25,14 +25,22 @@ func (r *SymbolRepo) ClearProjectData(projectID string) error {
 	}
 	defer tx.Rollback()
 
+	if err := clearSymbolsTx(tx, projectID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// clearSymbolsTx remove símbolos e referências de um projeto dentro de uma transação existente.
+func clearSymbolsTx(tx *sql.Tx, projectID string) error {
 	if _, err := tx.Exec(`DELETE FROM symbols WHERE project_id = ?`, projectID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM references_table WHERE project_id = ?`, projectID); err != nil {
 		return err
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // DeleteByFile remove todos os símbolos e referências de um arquivo específico.
@@ -65,6 +73,19 @@ func (r *SymbolRepo) SaveSymbols(projectID string, symbols []*Symbol) error {
 	}
 	defer tx.Rollback()
 
+	if err := insertSymbolsTx(tx, projectID, symbols); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertSymbolsTx insere símbolos em lote dentro de uma transação existente.
+func insertSymbolsTx(tx *sql.Tx, projectID string, symbols []*Symbol) error {
+	if len(symbols) == 0 {
+		return nil
+	}
+
 	stmt, err := tx.Prepare(`
 	INSERT INTO symbols (project_id, file, name, kind, signature, parent, language, start_line, end_line, start_byte, end_byte, relevance_score)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -93,8 +114,7 @@ func (r *SymbolRepo) SaveSymbols(projectID string, symbols []*Symbol) error {
 			return fmt.Errorf("falha ao inserir símbolo %s: %w", s.Name, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // SaveReferences salva uma lista de chamadores/referências em lote utilizando transação.
@@ -108,6 +128,19 @@ func (r *SymbolRepo) SaveReferences(projectID string, refs []*CallerInfo) error 
 		return err
 	}
 	defer tx.Rollback()
+
+	if err := insertReferencesTx(tx, projectID, refs); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertReferencesTx insere referências em lote dentro de uma transação existente.
+func insertReferencesTx(tx *sql.Tx, projectID string, refs []*CallerInfo) error {
+	if len(refs) == 0 {
+		return nil
+	}
 
 	stmt, err := tx.Prepare(`
 	INSERT OR IGNORE INTO references_table (project_id, file, line, text, symbol_name)
@@ -130,8 +163,7 @@ func (r *SymbolRepo) SaveReferences(projectID string, refs []*CallerInfo) error 
 			return fmt.Errorf("falha ao inserir referência %s: %w", ref.SymbolName, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // FindSymbol busca símbolos por nome exato ou contenção parcial no projeto com suporte a ordenação por relevância e paginação.

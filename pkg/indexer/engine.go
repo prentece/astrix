@@ -28,6 +28,7 @@ type Engine struct {
 	depRepo       storage.DependencyGraphRepository
 	dataModelRepo storage.DataModelRepository
 	fileStateRepo storage.FileStateRepository
+	indexReplacer storage.IndexReplacer
 	indexingMu    sync.Mutex
 	indexingMap   map[string]bool
 	progressMap   map[string]*storage.IndexingProgress
@@ -64,6 +65,12 @@ func (e *Engine) GetIndexingProgress(projectID string) *storage.IndexingProgress
 // SetFileStateRepo injeta o repositório de estados de arquivo.
 func (e *Engine) SetFileStateRepo(repo storage.FileStateRepository) {
 	e.fileStateRepo = repo
+}
+
+// SetIndexReplacer injeta o gravador atômico de índice usado na reindexação completa.
+// Quando nil, a engine usa o caminho legado (não-atômico) baseado nos repositórios individuais.
+func (e *Engine) SetIndexReplacer(r storage.IndexReplacer) {
+	e.indexReplacer = r
 }
 
 // detectLanguageByExtension detecta a linguagem de programação com base na extensão do arquivo.
@@ -189,18 +196,7 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 	}
 	e.indexingMu.Unlock()
 
-	// 2. Limpa dados de indexações anteriores deste projeto
-	if err := e.symbolRepo.ClearProjectData(proj.ID); err != nil {
-		errMsg := fmt.Sprintf("falha ao limpar índice antigo: %v", err)
-		_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, 0, 0)
-		return err
-	}
-	if e.depRepo != nil {
-		_ = e.depRepo.ClearProjectDependencies(proj.ID)
-	}
-	if e.dataModelRepo != nil {
-		_ = e.dataModelRepo.ClearProjectDataModels(proj.ID)
-	}
+	// 2. (Limpeza do índice antigo ocorre após o parse, antes de salvar — ver passo 4.)
 
 	var allSymbols []*storage.Symbol
 	var allRefs []*storage.CallerInfo
@@ -334,26 +330,61 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 		e.indexingMu.Unlock()
 	}
 
-	// 4. Salva os símbolos, referências, dependências e modelos no SQLite
-	if err := e.symbolRepo.SaveSymbols(proj.ID, allSymbols); err != nil {
-		errMsg := fmt.Sprintf("falha ao salvar símbolos: %v", err)
-		_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, len(files), 0)
-		return err
-	}
-
-	if err := e.symbolRepo.SaveReferences(proj.ID, allRefs); err != nil {
-		log.Printf("[INDEXER WARN] Falha ao salvar referências: %v\n", err)
-	}
-
-	if e.depRepo != nil && len(allDeps) > 0 {
-		if err := e.depRepo.SaveDependencies(proj.ID, allDeps); err != nil {
-			log.Printf("[INDEXER WARN] Falha ao salvar dependências: %v\n", err)
+	// 3.1/4. Persiste o novo índice. Com IndexReplacer, limpeza + gravação de símbolos, referências,
+	// dependências, modelos e estados de arquivo ocorrem em UMA transação: se algo falhar, o índice
+	// anterior permanece intacto.
+	statesPersisted := false
+	if e.indexReplacer != nil {
+		snap := &storage.IndexSnapshot{
+			ProjectID:         proj.ID,
+			Symbols:           allSymbols,
+			References:        allRefs,
+			Dependencies:      allDeps,
+			DataModels:        allModels,
+			FileStates:        allFileStates,
+			ReplaceFileStates: e.fileStateRepo != nil,
 		}
-	}
+		if err := e.indexReplacer.ReplaceProjectIndex(snap); err != nil {
+			errMsg := fmt.Sprintf("falha ao salvar índice: %v", err)
+			_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, len(files), 0)
+			return err
+		}
+		statesPersisted = true
+	} else {
+		// Fallback não-atômico (repositórios sem suporte a transação compartilhada).
+		// Limpa dados de indexações anteriores somente após o parse concluir.
+		if err := e.symbolRepo.ClearProjectData(proj.ID); err != nil {
+			errMsg := fmt.Sprintf("falha ao limpar índice antigo: %v", err)
+			_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, 0, 0)
+			return err
+		}
+		if e.depRepo != nil {
+			_ = e.depRepo.ClearProjectDependencies(proj.ID)
+		}
+		if e.dataModelRepo != nil {
+			_ = e.dataModelRepo.ClearProjectDataModels(proj.ID)
+		}
 
-	if e.dataModelRepo != nil && len(allModels) > 0 {
-		if err := e.dataModelRepo.SaveDataModels(proj.ID, allModels); err != nil {
-			log.Printf("[INDEXER WARN] Falha ao salvar modelos de dados: %v\n", err)
+		if err := e.symbolRepo.SaveSymbols(proj.ID, allSymbols); err != nil {
+			errMsg := fmt.Sprintf("falha ao salvar símbolos: %v", err)
+			_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, len(files), 0)
+			return err
+		}
+
+		if err := e.symbolRepo.SaveReferences(proj.ID, allRefs); err != nil {
+			log.Printf("[INDEXER WARN] Falha ao salvar referências: %v\n", err)
+		}
+
+		if e.depRepo != nil && len(allDeps) > 0 {
+			if err := e.depRepo.SaveDependencies(proj.ID, allDeps); err != nil {
+				log.Printf("[INDEXER WARN] Falha ao salvar dependências: %v\n", err)
+			}
+		}
+
+		if e.dataModelRepo != nil && len(allModels) > 0 {
+			if err := e.dataModelRepo.SaveDataModels(proj.ID, allModels); err != nil {
+				log.Printf("[INDEXER WARN] Falha ao salvar modelos de dados: %v\n", err)
+			}
 		}
 	}
 
@@ -374,7 +405,7 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 	}
 
 	// 5.2. Persistência de baseline dos estados de arquivos (Two-Tier Hash em lote)
-	if e.fileStateRepo != nil && len(allFileStates) > 0 {
+	if !statesPersisted && e.fileStateRepo != nil && len(allFileStates) > 0 {
 		_ = e.fileStateRepo.DeleteByProject(proj.ID)
 		if err := e.fileStateRepo.UpsertBatch(allFileStates); err != nil {
 			log.Printf("[INDEXER WARN] Falha ao salvar estados de arquivos em lote: %v\n", err)
@@ -943,7 +974,10 @@ func (e *Engine) GetImplementation(project *storage.Project, filePath, symbolNam
 		return "", err
 	}
 
-	absPath := filepath.Join(project.Path, filePath)
+	absPath, err := SafeJoin(project.Path, filePath)
+	if err != nil {
+		return "", err
+	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", fmt.Errorf("falha ao ler arquivo '%s': %w", filePath, err)
@@ -954,7 +988,10 @@ func (e *Engine) GetImplementation(project *storage.Project, filePath, symbolNam
 		symbols, _, err := e.symbolRepo.FindSymbol(project.ID, symbolName, 1, 0)
 		if err == nil && len(symbols) > 0 {
 			sym = symbols[0]
-			absPath = filepath.Join(project.Path, sym.File)
+			absPath, err = SafeJoin(project.Path, sym.File)
+			if err != nil {
+				return "", err
+			}
 			content, err = os.ReadFile(absPath)
 			if err != nil {
 				return "", fmt.Errorf("falha ao ler arquivo '%s': %w", sym.File, err)
@@ -980,7 +1017,10 @@ func (e *Engine) GetImplementation(project *storage.Project, filePath, symbolNam
 
 // PeekFile lê um intervalo cirúrgico de linhas com contexto AST, smart anchor e header enriquecido.
 func (e *Engine) PeekFile(project *storage.Project, filePath string, startLine, endLine int, anchorSymbol string) (string, error) {
-	absPath := filepath.Join(project.Path, filePath)
+	absPath, err := SafeJoin(project.Path, filePath)
+	if err != nil {
+		return "", err
+	}
 
 	// Smart Anchor: posiciona janela automaticamente no símbolo
 	anchorWarning := ""
@@ -1185,7 +1225,10 @@ func (e *Engine) GrepProject(ctx context.Context, project *storage.Project, patt
 
 	searchRoot := project.Path
 	if pathPrefix != "" {
-		searchRoot = filepath.Join(project.Path, pathPrefix)
+		searchRoot, err = SafeJoin(project.Path, pathPrefix)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	// Prepara o set de extensões permitidas para filtro rápido

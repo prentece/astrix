@@ -39,6 +39,19 @@ func (r *DependencyGraphRepo) SaveDependencies(projectID string, edges []*Depend
 	}
 	defer tx.Rollback()
 
+	if err := insertDependenciesTx(tx, projectID, edges); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertDependenciesTx insere arestas de dependência dentro de uma transação existente.
+func insertDependenciesTx(tx *sql.Tx, projectID string, edges []*DependencyEdge) error {
+	if len(edges) == 0 {
+		return nil
+	}
+
 	stmt, err := tx.Prepare(`
 		INSERT INTO dependency_graph (project_id, source_symbol, target_symbol, source_file, target_file, relationship_type, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -67,8 +80,7 @@ func (r *DependencyGraphRepo) SaveDependencies(projectID string, edges []*Depend
 			return err
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // GetDownstreamEdges obtém todas as arestas onde source_symbol = symbol.

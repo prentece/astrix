@@ -24,7 +24,10 @@ func QueryStructuredFile(rootDir, relPath, query string) (string, error) {
 		return "", fmt.Errorf("expressão de busca (query) é obrigatória")
 	}
 
-	absPath := filepath.Join(rootDir, relPath)
+	absPath, err := SafeJoin(rootDir, relPath)
+	if err != nil {
+		return "", err
+	}
 	ext := strings.ToLower(filepath.Ext(relPath))
 
 	switch ext {

@@ -54,6 +54,7 @@ func Execute() {
 
 	engine := indexer.NewEngine(projectRepo, symbolRepo, depRepo, dataModelRepo)
 	engine.SetFileStateRepo(fileStateRepo)
+	engine.SetIndexReplacer(storage.NewIndexStore(database))
 
 	projectService := service.NewProjectService(projectRepo, symbolRepo, engine)
 	codeService := service.NewCodeService(projectRepo, symbolRepo, depRepo, dataModelRepo, engine)
