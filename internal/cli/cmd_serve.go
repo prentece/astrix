@@ -6,6 +6,7 @@ import (
 	"astrix/pkg/watcher"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -18,6 +19,9 @@ func RunServe(
 	codeService *service.CodeService,
 	fileWatcher *watcher.FileWatcherService,
 ) error {
+	if existingPid, isAlive := ReadPID(); isAlive && existingPid != os.Getpid() {
+		return fmt.Errorf("outro servidor MCP já está ativo com PID %d", existingPid)
+	}
 	_ = WritePID()
 	defer RemovePID()
 
@@ -45,7 +49,7 @@ func RunServe(
 		}
 	}
 
-	mcpServer := mcp.NewServer(projectService, codeService)
+	mcpServer := mcp.NewServer(projectService, codeService, Version)
 	log.Println("[MCP] Servidor Astrix MCP inicializado via transporte STDIO (port-free).")
 
 	if err := mcpServer.ServeStdio(); err != nil {

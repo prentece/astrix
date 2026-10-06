@@ -16,7 +16,7 @@ func registerProjectTools(s *server.MCPServer, projectService *service.ProjectSe
 		mcp.WithDescription("Discover all registered repositories in the Astrix catalog and their 'project_id', name, language and path."),
 		mcp.WithString("format", mcp.Description("Output format: 'text' (default tabular ASCII) or 'json'.")),
 	)
-	s.AddTool(listProjectsTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(listProjectsTool, safeToolHandler(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projects, err := projectService.ListAll()
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to list projects: %v", err)), nil
@@ -24,7 +24,7 @@ func registerProjectTools(s *server.MCPServer, projectService *service.ProjectSe
 		format := getStringParam(req.Params.Arguments, "format")
 		asJSON := format == "json"
 		return mcp.NewToolResultText(FormatProjects(projects, asJSON)), nil
-	})
+	}))
 
 	// Tool: get_project_structure
 	getStructureTool := mcp.NewTool("get_project_structure",
@@ -35,7 +35,7 @@ func registerProjectTools(s *server.MCPServer, projectService *service.ProjectSe
 		mcp.WithBoolean("show_hidden", mcp.Description("Whether to show hidden files and folders starting with '.' (optional, default: false).")),
 		mcp.WithString("format", mcp.Description("Output format: 'text' (default, compact tree) or 'json'.")),
 	)
-	s.AddTool(getStructureTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(getStructureTool, safeToolHandler(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID := getStringParam(req.Params.Arguments, "project_id")
 		if projectID == "" {
 			return mcp.NewToolResultError("Field 'project_id' is required"), nil
@@ -53,7 +53,8 @@ func registerProjectTools(s *server.MCPServer, projectService *service.ProjectSe
 		}
 
 		output := FormatStructureTree(treeText, asJSON)
-		return mcp.NewToolResultText(output), nil
-	})
+		warn := checkProjectWarning(codeService, projectID)
+		return mcp.NewToolResultText(prependWarning(output, warn)), nil
+	}))
 }
 

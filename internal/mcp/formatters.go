@@ -550,3 +550,38 @@ func FormatImplementationBundle(results []service.BundleResult, asJSON bool) str
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
+
+// FormatFileOutline formata o outline estrutural de declarações de um arquivo.
+func FormatFileOutline(filePath string, symbols []*storage.Symbol, asJSON bool) string {
+	if len(symbols) == 0 {
+		return fmt.Sprintf("No symbols found in %s.", filePath)
+	}
+	if asJSON {
+		var list []LeanSymbol
+		for _, s := range symbols {
+			list = append(list, LeanSymbol{
+				File:      s.File,
+				StartLine: s.StartLine,
+				EndLine:   s.EndLine,
+				Kind:      string(s.Kind),
+				Name:      s.Name,
+				Signature: s.Signature,
+			})
+		}
+		return ToCleanJSON(map[string]any{"filepath": filePath, "symbols": list, "count": len(list)})
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Outline for %s (%d declarations):\n", filePath, len(symbols)))
+	for _, s := range symbols {
+		lines := fmt.Sprintf("L%d", s.StartLine)
+		if s.EndLine > s.StartLine {
+			lines = fmt.Sprintf("L%d-%d", s.StartLine, s.EndLine)
+		}
+		sb.WriteString(fmt.Sprintf("  %-8s %-12s %s\n", lines, s.Kind, s.Name))
+		if s.Signature != "" && s.Signature != s.Name {
+			sb.WriteString(fmt.Sprintf("           sig: %s\n", s.Signature))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}

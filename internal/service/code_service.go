@@ -34,6 +34,22 @@ func NewCodeService(
 	}
 }
 
+// GetProjectStatus retorna os metadados de status e progresso de indexação do projeto.
+func (s *CodeService) GetProjectStatus(projectID string) (*storage.Project, *storage.IndexingProgress, error) {
+	if s.projectRepo == nil || projectID == "" {
+		return nil, nil, nil
+	}
+	proj, err := s.projectRepo.GetByID(projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var prog *storage.IndexingProgress
+	if s.engine != nil {
+		prog = s.engine.GetIndexingProgress(projectID)
+	}
+	return proj, prog, nil
+}
+
 // FindSymbol busca símbolos na tabela AST com correspondência exata ou parcial e suporte a paginação.
 func (s *CodeService) FindSymbol(projectID, symbolName string, limit, offset int) ([]*storage.Symbol, bool, error) {
 	if projectID == "" {

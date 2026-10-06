@@ -21,7 +21,9 @@ func (r *ProjectRepo) Create(p *Project) error {
 	now := time.Now().UTC()
 	p.CreatedAt = now
 	p.UpdatedAt = now
-	p.Status = StatusPending
+	if p.Status == "" {
+		p.Status = StatusPending
+	}
 	if !p.AutoSync {
 		p.AutoSync = true
 	}

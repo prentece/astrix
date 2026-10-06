@@ -27,9 +27,10 @@ indexes instead of reading whole files. Astrix indexes **multiple projects**; ev
 |------|---------------|---------|
 | §list_projects§ | – | List all indexed projects (IDs, names, paths). |
 | §get_project_structure§ | §project_id§ (opt. §path§) | File tree; use to learn the topology. |
+| §get_file_outline§ | §project_id§, §filepath§ | Structural outline of declarations (types, functions, methods) with lines and signatures. |
 | §lookup_symbol§ | §project_id§, §symbol_name§, §mode§ (§definition§ or §references§) | Find declarations or all usages. |
 | §get_implementation§ | §project_id§, §filepath§, §symbol_name§ | Exact source of one function/method/struct/class. |
-| §get_implementation_bundle§ | §project_id§, §symbols§ (JSON array of §{filepath, symbol_name}§) | Several symbols in one call. |
+| §get_implementation_bundle§ | §project_id§, §symbols§ (array or JSON string of §{filepath, symbol_name}§) | Several symbols in one call. |
 | §read_file_lines§ | §project_id§, §filepath§, §start_line§, §end_line§ (opt. §anchor_symbol§) | A specific line window. |
 | §grep_code§ | §project_id§, §pattern§ (opt. §path_prefix§, §file_extensions§) | Text/regex search. |
 | §query_structured_file§ | §project_id§, §filepath§, §query§ | Query JSON/YAML/CSV by path without loading the file. |
@@ -38,6 +39,7 @@ All tools accept an optional §format§ (§text§ default, or §json§).
 
 ## Best practices
 
+- Use §get_file_outline§ to inspect the declarations and API of a file without reading full function bodies.
 - Prefer §lookup_symbol§ + §get_implementation§ over reading entire files.
 - Before renaming/refactoring, run §lookup_symbol§ with §mode="references"§ for impact analysis.
 - Use §get_implementation_bundle§ instead of several §get_implementation§ calls.
@@ -65,35 +67,41 @@ list_projects {}                    -> use when the project is not the current o
 ## 1. Explore an unfamiliar project
 
 1. §get_project_structure {"project_id": "<ID>"}§ – learn top-level layout.
-2. §get_project_structure {"project_id": "<ID>", "path": "internal/service"}§ – drill down.
-3. §query_structured_file {"project_id": "<ID>", "filepath": "package.json", "query": "scripts"}§ – entry points/deps.
-4. §get_implementation {"project_id": "<ID>", "filepath": "cmd/app/main.go", "symbol_name": "main"}§ – start of execution.
+2. §get_project_structure {"project_id": "<ID>", "path": "internal/service"}§ – drill down into folders.
+3. §get_file_outline {"project_id": "<ID>", "filepath": "internal/service/code_service.go"}§ – see declarations and signatures.
+4. §query_structured_file {"project_id": "<ID>", "filepath": "package.json", "query": "scripts"}§ – entry points/deps.
+5. §get_implementation {"project_id": "<ID>", "filepath": "cmd/app/main.go", "symbol_name": "main"}§ – start of execution.
 
-## 2. Find and read a symbol
+## 2. Inspect a file before reading implementations
+
+1. §get_file_outline {"project_id": "<ID>", "filepath": "pkg/storage/db.go"}§ → returns types, methods, functions with signatures and line ranges.
+2. Pick only the specific symbol you need: §get_implementation {"project_id": "<ID>", "filepath": "pkg/storage/db.go", "symbol_name": "NewDatabase"}§.
+
+## 3. Find and read a symbol
 
 1. §lookup_symbol {"project_id": "<ID>", "symbol_name": "UserService", "mode": "definition"}§ → returns filepath + line.
 2. §get_implementation {"project_id": "<ID>", "filepath": "<path from step 1>", "symbol_name": "UserService"}§.
 3. Need surrounding code? §read_file_lines {"project_id": "<ID>", "filepath": "<path>", "anchor_symbol": "UserService"}§.
 
-## 3. Impact analysis before refactoring
+## 4. Impact analysis before refactoring
 
 1. §lookup_symbol {"project_id": "<ID>", "symbol_name": "CreateOrder", "mode": "references"}§ – every call site.
 2. §get_implementation_bundle {"project_id": "<ID>", "symbols": "[{\"filepath\":\"a.go\",\"symbol_name\":\"CreateOrder\"},{\"filepath\":\"b.go\",\"symbol_name\":\"Handler\"}]"}§ – read definition and main callers at once.
 3. Refactor, then repeat step 1 to confirm no stale usages remain.
 
-## 4. Trace a call flow / debug an error
+## 5. Trace a call flow / debug an error
 
 1. §grep_code {"project_id": "<ID>", "pattern": "invalid token", "file_extensions": ".go"}§ – locate the error message.
 2. §read_file_lines {"project_id": "<ID>", "filepath": "<hit>", "start_line": <hit-20>, "end_line": <hit+20>}§.
 3. §lookup_symbol§ (§references§) on the enclosing function to walk up the callers.
 
-## 5. Cross-project navigation
+## 6. Cross-project navigation
 
 1. §list_projects {}§ → find the library/service project and its ID (<OTHER_ID>).
 2. §lookup_symbol {"project_id": "<OTHER_ID>", "symbol_name": "Client", "mode": "definition"}§.
 3. §get_implementation {"project_id": "<OTHER_ID>", ...}§ – read the API you integrate with, then return to <ID>.
 
-## 6. Inspect configuration
+## 7. Inspect configuration
 
 - §query_structured_file {"project_id": "<ID>", "filepath": "docker-compose.yml", "query": "services.api.ports"}§
 - §query_structured_file {"project_id": "<ID>", "filepath": "package.json", "query": "dependencies"}§
@@ -101,7 +109,7 @@ list_projects {}                    -> use when the project is not the current o
 ## Anti-patterns
 
 - Hardcoding or guessing a project ID.
-- Reading a whole file when §get_implementation§ or §read_file_lines§ suffices.
+- Reading a whole file when §get_file_outline§, §get_implementation§ or §read_file_lines§ suffices.
 - Calling §get_implementation§ repeatedly instead of §get_implementation_bundle§.
 `
 

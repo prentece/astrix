@@ -84,3 +84,56 @@ The CLI SHALL require explicit confirmation before deleting project metadata, in
 - **GIVEN** the user executes `astrix clean`
 - **WHEN** the user selects `Cancelar` or presses `Esc`
 - **THEN** the system SHALL exit immediately without modifying the database or printing errors
+
+---
+
+### Requirement: Fast-Path Utility Execution
+Utility commands (`version`, `-v`, `--version`, `help`, `-h`, `--help`) SHALL execute immediately without opening the SQLite database, running database migrations, or instantiating the file watcher.
+
+#### Scenario: User requests version
+- **GIVEN** the user runs `astrix version` or `astrix -v`
+- **WHEN** the command is processed
+- **THEN** the system SHALL print the version to stdout immediately and exit with code 0 without touching database files
+
+#### Scenario: User requests help
+- **GIVEN** the user runs `astrix --help` or `astrix -h`
+- **WHEN** the command is processed
+- **THEN** the system SHALL display the help banner and exit with code 0
+
+---
+
+### Requirement: Machine-Readable Script Output (`--json`)
+The CLI SHALL support the `--json` flag for inspection commands (`ls` and `status`) to provide clean, scriptable JSON output suitable for automation and tooling.
+
+#### Scenario: Listing projects in JSON format
+- **GIVEN** projects are registered in Astrix
+- **WHEN** the user executes `astrix ls --json`
+- **THEN** the output SHALL be a valid JSON array of project objects formatted with indentation
+- **AND** if no projects are registered, it SHALL output an empty JSON array `[]`
+
+#### Scenario: Inspecting status in JSON format
+- **GIVEN** the user executes `astrix status --json`
+- **WHEN** the command is executed
+- **THEN** the output SHALL be a structured JSON object containing `database_path`, `log_path`, `projects_count`, `mcp_server` (`online`, `pid`), and `current_context`
+
+---
+
+### Requirement: Non-Zero Exit Code on Failure
+The CLI SHALL return a non-zero exit code (exit code 1) when any command fails or when an unknown command is invoked.
+
+#### Scenario: Unknown command invocation
+- **GIVEN** the user executes an invalid command `astrix unknown-cmd`
+- **WHEN** the CLI routes the arguments
+- **THEN** it SHALL display an error message and help text, returning a non-zero exit code
+
+---
+
+### Requirement: Concurrency-Safe Dangling Indexing Reset
+The CLI SHALL verify whether an MCP server process is currently active before resetting dangling `indexing` project states to avoid interrupting legitimate in-flight indexing jobs.
+
+#### Scenario: Running CLI command while MCP server is actively indexing
+- **GIVEN** an active `astrix serve` process is indexing a project in background
+- **WHEN** the user runs `astrix ls` or `astrix status` from another terminal
+- **THEN** the CLI SHALL detect the running MCP server PID
+- **AND** it SHALL preserve the in-flight `indexing` project status without resetting it
+

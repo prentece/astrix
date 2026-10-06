@@ -18,8 +18,20 @@ import (
 )
 
 // Execute é o ponto de entrada principal da CLI do Astrix.
-func Execute() {
+func Execute() error {
 	args := os.Args[1:]
+
+	// CLI 1: Fast-path para utilitários imediatos (sem abrir banco, migrações ou watcher)
+	if len(args) > 0 {
+		switch args[0] {
+		case "version", "--version", "-v":
+			fmt.Printf("astrix v%s\n", Version)
+			return nil
+		case "help", "--help", "-h":
+			PrintHelp()
+			return nil
+		}
+	}
 
 	dbPath, err := GetDatabasePath()
 	if err != nil {
@@ -46,7 +58,12 @@ func Execute() {
 	defer database.Close()
 
 	projectRepo := storage.NewProjectRepo(database)
-	_ = projectRepo.ResetDanglingIndexingStatus()
+
+	// CLI 4: Só reseta status pendente se nenhum servidor MCP estiver vivo
+	if _, isAlive := ReadPID(); !isAlive {
+		_ = projectRepo.ResetDanglingIndexingStatus()
+	}
+
 	symbolRepo := storage.NewSymbolRepo(database)
 	depRepo := storage.NewDependencyGraphRepo(database)
 	dataModelRepo := storage.NewDataModelRepo(database)
@@ -64,10 +81,12 @@ func Execute() {
 		projectService.SetWatcher(fileWatcher)
 	}
 
-	printErr := func(err error) {
+	handleErr := func(err error) error {
 		if err != nil && !errors.Is(err, huh.ErrUserAborted) {
 			fmt.Print(ui.ErrorBox(err.Error(), ""))
+			return err
 		}
+		return nil
 	}
 
 	if len(args) == 0 {
@@ -76,13 +95,12 @@ func Execute() {
 		ctx, err := DetectContext(currDir, projectRepo)
 		if err != nil {
 			fmt.Printf("Erro ao detectar contexto: %v\n", err)
-			return
+			return err
 		}
 
 		if ctx.IsRegistered {
 			// Projeto cadastrado: exibe dashboard visual interativo
-			printErr(RunDashboard(projectService, codeService, fileWatcher, ctx))
-			return
+			return handleErr(RunDashboard(projectService, codeService, fileWatcher, ctx))
 		}
 
 		if ctx.IsProject && !ctx.IsRegistered {
@@ -91,48 +109,52 @@ func Execute() {
 			isFirstProject := len(existing) == 0
 
 			wizardErr := RunWizard(projectService, ctx)
-			printErr(wizardErr)
+			if err := handleErr(wizardErr); err != nil {
+				return err
+			}
 
 			// Boas-vindas: no primeiro projeto cadastrado, abre o painel já pronto para uso
 			if wizardErr == nil && isFirstProject {
 				if newCtx, err := DetectContext(currDir, projectRepo); err == nil && newCtx.IsRegistered {
-					printErr(RunDashboard(projectService, codeService, fileWatcher, newCtx))
+					return handleErr(RunDashboard(projectService, codeService, fileWatcher, newCtx))
 				}
 			}
-			return
+			return nil
 		}
 
 		// Fora de repositório de projeto: abre painel interativo global
-		printErr(RunGlobalDashboard(projectService, codeService, fileWatcher))
-		return
+		return handleErr(RunGlobalDashboard(projectService, codeService, fileWatcher))
 	}
 
 	command := args[0]
 	switch command {
 	case "ls", "list":
-		printErr(RunList(projectService))
+		return handleErr(RunList(projectService, args[1:]...))
 	case "status":
-		printErr(RunStatus(projectService))
+		return handleErr(RunStatus(projectService, args[1:]...))
 	case "serve", "server":
-		printErr(RunServe(projectService, codeService, fileWatcher))
+		return handleErr(RunServe(projectService, codeService, fileWatcher))
 	case "config":
-		printErr(PrintMCPConfigWithArgs(args[1:]))
+		return handleErr(PrintMCPConfigWithArgs(args[1:]))
 	case "mcp":
-		printErr(RunMCPCommand(args[1:], projectService, codeService, fileWatcher))
+		return handleErr(RunMCPCommand(args[1:], projectService, codeService, fileWatcher))
 	case "index", "reindex", "rebuild":
-		printErr(RunIndex(projectService))
+		return handleErr(RunIndex(projectService))
 	case "clean":
-		printErr(RunClean(projectService))
+		return handleErr(RunClean(projectService))
 	case "skills":
-		printErr(RunSkills(projectService))
+		return handleErr(RunSkills(projectService))
 	case "version", "--version", "-v":
 		fmt.Printf("astrix v%s\n", Version)
+		return nil
 	case "help", "--help", "-h":
 		PrintHelp(projectRepo)
+		return nil
 	default:
 		fmt.Print(ui.ErrorBox(fmt.Sprintf("Comando desconhecido: '%s'", command), ""))
 		fmt.Println()
 		PrintHelp(projectRepo)
+		return fmt.Errorf("comando desconhecido: %s", command)
 	}
 }
 

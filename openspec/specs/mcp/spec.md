@@ -65,13 +65,56 @@ The MCP server SHALL provide the `get_implementation` tool to extract the exact 
 ---
 
 ### Requirement: Batch Implementation Bundling
-The MCP server SHALL provide the `get_implementation_bundle` tool to retrieve multiple symbols across different files in a single request.
+The MCP server SHALL provide the `get_implementation_bundle` tool to retrieve multiple symbols across different files in a single request, accepting targets as a typed JSON array of objects or serialized JSON string.
 
-#### Scenario: Fetching multiple symbols in one call
-- **GIVEN** a list of symbol targets `[{"filepath": "...", "symbol_name": "..."}, ...]`
+#### Scenario: Fetching multiple symbols via typed array
+- **GIVEN** a native array of symbol targets `[{"filepath": "...", "symbol_name": "..."}, ...]`
 - **WHEN** the client invokes `get_implementation_bundle`
 - **THEN** the server SHALL extract all requested symbol implementations
 - **AND** it SHALL concatenate and return them organized by file in a single response
+
+#### Scenario: Fetching multiple symbols via serialized JSON string
+- **GIVEN** a JSON-encoded string representing the list of symbol targets
+- **WHEN** the client invokes `get_implementation_bundle`
+- **THEN** the server SHALL deserialize the string and extract all requested symbols for backward compatibility
+
+---
+
+### Requirement: File Declaration Outline
+The MCP server SHALL provide the `get_file_outline` tool to inspect all declarations in a file without returning full function bodies.
+
+#### Scenario: Inspecting declarations of a source file
+- **GIVEN** a valid `project_id` and relative `filepath`
+- **WHEN** the client invokes `get_file_outline`
+- **THEN** the server SHALL return a structural outline containing lines, kind, name, and signature of each declaration in the file
+- **AND** it SHALL support formatted text outline or structured JSON when `format = "json"`
+
+---
+
+### Requirement: Index Status Warnings and Partial Results
+The MCP server SHALL prepend a contextual warning to tool execution results when the targeted project is not in `ready` state.
+
+#### Scenario: Querying a project undergoing background indexing
+- **GIVEN** a project with status `indexing`
+- **WHEN** the client queries code intelligence tools
+- **THEN** the response SHALL prepend a warning indicating indexing progress percentage and file counts (e.g., `[INDEXING 45% (9/20 arquivos)]`)
+
+#### Scenario: Querying a project with stale or failed index
+- **GIVEN** a project with status `error`
+- **WHEN** the client queries code intelligence tools
+- **THEN** the response SHALL prepend a `[STALE INDEX]` warning with the failure reason
+
+---
+
+### Requirement: Tool Panic Recovery and Process Resilience
+All MCP tool handlers SHALL be guarded with panic recovery to protect the STDIO connection and server process against fatal runtime panics (such as Tree-sitter CGO crashes).
+
+#### Scenario: A tool handler encounters an unexpected panic
+- **GIVEN** a tool handler suffers a panic during AST extraction or query execution
+- **WHEN** the panic occurs
+- **THEN** the server SHALL recover from the panic
+- **AND** it SHALL return an MCP tool error result (`isError = true`) with the panic details
+- **AND** the STDIO JSON-RPC session SHALL remain alive and ready for subsequent requests
 
 ---
 
@@ -103,3 +146,4 @@ The MCP server SHALL provide the `query_structured_file` tool to inspect configu
 - **GIVEN** a valid `project_id`, `filepath = "package.json"`, and `query = "dependencies"`
 - **WHEN** the client invokes `query_structured_file`
 - **THEN** the server SHALL parse the structured file and return only the requested property value
+

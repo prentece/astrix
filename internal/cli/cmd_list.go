@@ -3,21 +3,38 @@ package cli
 import (
 	"astrix/internal/cli/ui"
 	"astrix/internal/service"
+	"encoding/json"
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// RunList executa o comando 'ls' exibindo os projetos cadastrados em lista vertical responsiva.
-func RunList(projService *service.ProjectService) error {
-	return PrintList(projService, false)
+// RunList executa o comando 'ls' exibindo os projetos cadastrados.
+func RunList(projService *service.ProjectService, args ...string) error {
+	isJSON := false
+	for _, a := range args {
+		if a == "--json" {
+			isJSON = true
+			break
+		}
+	}
+	return PrintList(projService, isJSON)
 }
 
 // PrintList renderiza a lista de projetos cadastrados.
-func PrintList(projService *service.ProjectService, _ ...bool) error {
+func PrintList(projService *service.ProjectService, isJSON ...bool) error {
 	projects, err := projService.ListAll()
 	if err != nil {
 		return fmt.Errorf("falha ao listar projetos: %w", err)
+	}
+
+	if len(isJSON) > 0 && isJSON[0] {
+		data, err := json.MarshalIndent(projects, "", "  ")
+		if err != nil {
+			return fmt.Errorf("falha ao formatar JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
 	}
 
 	if len(projects) == 0 {
