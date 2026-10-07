@@ -31,6 +31,9 @@ func setupTestWatcherEnv(t *testing.T) (*storage.DB, *indexer.Engine, string) {
 
 	engine := indexer.NewEngine(projectRepo, symbolRepo, depRepo, dataModelRepo)
 	engine.SetFileStateRepo(fileStateRepo)
+	indexStore := storage.NewIndexStore(database)
+	engine.SetIndexReplacer(indexStore)
+	engine.SetIncrementalApplier(indexStore)
 
 	return database, engine, tmpDir
 }
@@ -329,5 +332,195 @@ func TestFileWatcher_DirtyRescheduledAfterSync(t *testing.T) {
 		return err == nil && len(syms) > 0
 	}, 3*time.Second, 50*time.Millisecond)
 }
+
+func TestFileWatcher_FullLifecycle_CreateModifyDelete(t *testing.T) {
+	database, engine, tmpDir := setupTestWatcherEnv(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	symbolRepo := storage.NewSymbolRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	watcherService, err := watcher.NewFileWatcherService(projectRepo, fileStateRepo, engine)
+	require.NoError(t, err)
+	defer watcherService.Stop()
+
+	// Debounce rápido para testes
+	watcherService.SetDebounceDuration(80 * time.Millisecond)
+
+	repoDir := filepath.Join(tmpDir, "lifecycle_repo")
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+
+	// Arquivo inicial
+	mainFile := filepath.Join(repoDir, "main.go")
+	require.NoError(t, os.WriteFile(mainFile, []byte("package main\n\nfunc Main() {}\n"), 0o644))
+
+	proj := &storage.Project{
+		ID:       "proj-lifecycle-test",
+		Name:     "Lifecycle Test",
+		Path:     repoDir,
+		Language: "go",
+		Status:   storage.StatusReady,
+	}
+	require.NoError(t, projectRepo.Create(proj))
+	require.NoError(t, watcherService.WatchProject(proj))
+
+	// Indexa o estado inicial (baseline)
+	_, err = engine.ProcessIncrementalDelta(proj.ID)
+	require.NoError(t, err)
+
+	p, err := projectRepo.GetByID(proj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, p.FileCount)
+	assert.Equal(t, 1, p.SymbolCount)
+
+	// Inicia o watcher
+	require.NoError(t, watcherService.Start())
+
+	// ==========================================
+	// 1. CRIAÇÃO: Criar novo arquivo calc.go
+	// ==========================================
+	calcFile := filepath.Join(repoDir, "calc.go")
+	require.NoError(t, os.WriteFile(calcFile, []byte("package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"), 0o644))
+
+	// Aguarda o watcher auto-sincronizar a criação
+	require.Eventually(t, func() bool {
+		syms, _, err := symbolRepo.FindSymbol(proj.ID, "Add", 10, 0)
+		return err == nil && len(syms) == 1
+	}, 3*time.Second, 50*time.Millisecond, "Símbolo Add deve ser indexado após criação do arquivo")
+
+	// Verifica se file state foi criado
+	states, err := fileStateRepo.ListByProject(proj.ID)
+	require.NoError(t, err)
+	assert.Contains(t, states, "calc.go")
+
+	// Verifica se metadados do projeto foram atualizados
+	p, err = projectRepo.GetByID(proj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, p.FileCount, "FileCount deve ser 2 após criação")
+	assert.Equal(t, 2, p.SymbolCount, "SymbolCount deve ser 2 após criação")
+
+	// ==========================================
+	// 2. ALTERAÇÃO: Modificar calc.go adicionando Sub
+	// ==========================================
+	modifiedContent := "package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n\nfunc Sub(a, b int) int {\n\treturn a - b\n}\n"
+	require.NoError(t, os.WriteFile(calcFile, []byte(modifiedContent), 0o644))
+
+	// Aguarda o watcher auto-sincronizar a modificação
+	require.Eventually(t, func() bool {
+		symsSub, _, errSub := symbolRepo.FindSymbol(proj.ID, "Sub", 10, 0)
+		symsAdd, _, errAdd := symbolRepo.FindSymbol(proj.ID, "Add", 10, 0)
+		return errSub == nil && len(symsSub) == 1 && errAdd == nil && len(symsAdd) == 1
+	}, 3*time.Second, 50*time.Millisecond, "Símbolos Add e Sub devem existir após alteração do arquivo")
+
+	p, err = projectRepo.GetByID(proj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, p.FileCount, "FileCount deve permanecer 2")
+	assert.Equal(t, 3, p.SymbolCount, "SymbolCount deve ser 3 (Main, Add, Sub)")
+
+	// ==========================================
+	// 3. DELEÇÃO: Remover calc.go do disco
+	// ==========================================
+	require.NoError(t, os.Remove(calcFile))
+
+	// Aguarda o watcher auto-sincronizar a deleção
+	require.Eventually(t, func() bool {
+		symsAdd, _, _ := symbolRepo.FindSymbol(proj.ID, "Add", 10, 0)
+		symsSub, _, _ := symbolRepo.FindSymbol(proj.ID, "Sub", 10, 0)
+		return len(symsAdd) == 0 && len(symsSub) == 0
+	}, 3*time.Second, 50*time.Millisecond, "Símbolos de calc.go devem ser removidos após deleção do arquivo")
+
+	// Verifica se file state foi removido
+	states, err = fileStateRepo.ListByProject(proj.ID)
+	require.NoError(t, err)
+	assert.NotContains(t, states, "calc.go", "calc.go não deve mais constar em project_file_states")
+
+	// Verifica se metadados do projeto retornaram ao estado baseline
+	p, err = projectRepo.GetByID(proj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, p.FileCount, "FileCount deve retornar para 1 após deleção")
+	assert.Equal(t, 1, p.SymbolCount, "SymbolCount deve retornar para 1 após deleção")
+}
+
+func TestFileWatcher_JavaScriptLifecycle(t *testing.T) {
+	database, engine, tmpDir := setupTestWatcherEnv(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	symbolRepo := storage.NewSymbolRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	watcherService, err := watcher.NewFileWatcherService(projectRepo, fileStateRepo, engine)
+	require.NoError(t, err)
+	defer watcherService.Stop()
+
+	watcherService.SetDebounceDuration(80 * time.Millisecond)
+
+	repoDir := filepath.Join(tmpDir, "js_repo")
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+
+	// Arquivo inicial
+	indexFile := filepath.Join(repoDir, "index.js")
+	require.NoError(t, os.WriteFile(indexFile, []byte("function init() {}\n"), 0o644))
+
+	proj := &storage.Project{
+		ID:       "proj-js-test",
+		Name:     "JS Test",
+		Path:     repoDir,
+		Language: "javascript",
+		Status:   storage.StatusReady,
+	}
+	require.NoError(t, projectRepo.Create(proj))
+	require.NoError(t, watcherService.WatchProject(proj))
+
+	// Baseline
+	_, err = engine.ProcessIncrementalDelta(proj.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, watcherService.Start())
+
+	// 1. CRIAÇÃO: criar teste.js
+	testeFile := filepath.Join(repoDir, "teste.js")
+	require.NoError(t, os.WriteFile(testeFile, []byte("function Hello() {\n    console.log(\"Hello World\");\n}\n"), 0o644))
+
+	require.Eventually(t, func() bool {
+		syms, _, err := symbolRepo.FindSymbol(proj.ID, "Hello", 10, 0)
+		return err == nil && len(syms) == 1
+	}, 3*time.Second, 50*time.Millisecond, "Função Hello de teste.js deve ser indexada")
+
+	p, err := projectRepo.GetByID(proj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, p.FileCount)
+	assert.Equal(t, 2, p.SymbolCount)
+
+	// 2. ALTERAÇÃO: adicionar Goodbye em teste.js
+	require.NoError(t, os.WriteFile(testeFile, []byte("function Hello() {}\nfunction Goodbye() {}\n"), 0o644))
+
+	require.Eventually(t, func() bool {
+		syms, _, err := symbolRepo.FindSymbol(proj.ID, "Goodbye", 10, 0)
+		return err == nil && len(syms) == 1
+	}, 3*time.Second, 50*time.Millisecond, "Função Goodbye deve ser indexada após alteração")
+
+	p, err = projectRepo.GetByID(proj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 3, p.SymbolCount)
+
+	// 3. DELEÇÃO: apagar teste.js
+	require.NoError(t, os.Remove(testeFile))
+
+	require.Eventually(t, func() bool {
+		symsHello, _, _ := symbolRepo.FindSymbol(proj.ID, "Hello", 10, 0)
+		symsGoodbye, _, _ := symbolRepo.FindSymbol(proj.ID, "Goodbye", 10, 0)
+		return len(symsHello) == 0 && len(symsGoodbye) == 0
+	}, 3*time.Second, 50*time.Millisecond, "Símbolos de teste.js devem ser removidos após deleção")
+
+	p, err = projectRepo.GetByID(proj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, p.FileCount)
+	assert.Equal(t, 1, p.SymbolCount)
+}
+
 
 

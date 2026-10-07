@@ -125,7 +125,7 @@ func DetectContext(dir string, projectRepo ...storage.ProjectRepository) (*Proje
 // SaveProjectConfig grava os metadados do projeto na pasta .astrix/config.json
 func SaveProjectConfig(dir, projectID, name, lang string) error {
 	astrixPath := filepath.Join(dir, AstrixDir)
-	if err := os.MkdirAll(astrixPath, 0755); err != nil {
+	if err := os.MkdirAll(astrixPath, 0o755); err != nil {
 		return fmt.Errorf("falha ao criar pasta %s: %w", AstrixDir, err)
 	}
 
@@ -141,7 +141,7 @@ func SaveProjectConfig(dir, projectID, name, lang string) error {
 	}
 
 	configFile := filepath.Join(astrixPath, "config.json")
-	if err := os.WriteFile(configFile, data, 0644); err != nil {
+	if err := os.WriteFile(configFile, data, 0o644); err != nil {
 		return fmt.Errorf("falha ao gravar config.json: %w", err)
 	}
 

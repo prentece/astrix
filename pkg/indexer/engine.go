@@ -1,8 +1,8 @@
 package indexer
 
 import (
-	"bufio"
 	"astrix/pkg/storage"
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -60,8 +60,8 @@ func (e *Engine) GetIndexingProgress(projectID string) *storage.IndexingProgress
 	e.indexingMu.Lock()
 	defer e.indexingMu.Unlock()
 	if p, ok := e.progressMap[projectID]; ok && p != nil {
-		copy := *p
-		return &copy
+		cp := *p
+		return &cp
 	}
 	return nil
 }
@@ -1282,7 +1282,7 @@ func (e *Engine) PeekFile(project *storage.Project, filePath string, startLine, 
 	if err != nil {
 		return "", fmt.Errorf("falha ao abrir arquivo '%s': %w", filePath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if startLine <= 0 {
 		startLine = 1
@@ -1673,7 +1673,7 @@ func (e *Engine) grepSingleFile(absPath, relPath string, re *regexp.Regexp, cont
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Detecção heurística de binário: lê os primeiros 512 bytes
 	probe := make([]byte, 512)

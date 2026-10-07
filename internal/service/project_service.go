@@ -280,7 +280,7 @@ func FormatProjectDisplayName(raw string) string {
 // DetectProjectManifestInfo inspeciona os arquivos de manifesto existentes no diretório
 // ("package.json", "go.mod", "pom.xml", "build.gradle", "composer.json", "requirements.txt", "Cargo.toml", "dubbo.properties")
 // e extrai o nome e a linguagem principal do projeto.
-func DetectProjectManifestInfo(dirPath string) (name string, lang string) {
+func DetectProjectManifestInfo(dirPath string) (name, lang string) {
 	if dirPath == "" {
 		return "", "auto"
 	}
@@ -479,8 +479,7 @@ func (s *ProjectService) BrowsePath(targetPath string) (*BrowseResponse, error) 
 		isDocker = true
 	}
 
-	rootPath := "/"
-	rootLabel := "Raiz (/)"
+	var rootPath, rootLabel string
 
 	if isDocker {
 		// Restringe ao container

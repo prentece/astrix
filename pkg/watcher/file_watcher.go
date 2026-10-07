@@ -18,18 +18,18 @@ import (
 
 // FileWatcherService monitora alterações no sistema de arquivos em tempo real e gerencia auto-sincronização.
 type FileWatcherService struct {
-	projectRepo    storage.ProjectRepository
-	fileStateRepo  storage.FileStateRepository
-	engine         *indexer.Engine
-	deltaEngine    *indexer.DeltaEngine
+	projectRepo   storage.ProjectRepository
+	fileStateRepo storage.FileStateRepository
+	engine        *indexer.Engine
+	deltaEngine   *indexer.DeltaEngine
 
 	watcher          *fsnotify.Watcher
 	debounceDuration time.Duration
 
-	mu              sync.RWMutex
-	watchedProjects map[string]*storage.Project // projectID -> Project
-	pathProjects      map[string]string          // canonical path -> projectID
-	autoSync          map[string]bool            // projectID -> bool (default true)
+	mu                sync.RWMutex
+	watchedProjects   map[string]*storage.Project // projectID -> Project
+	pathProjects      map[string]string           // canonical path -> projectID
+	autoSync          map[string]bool             // projectID -> bool (default true)
 	pendingDeltas     map[string]*storage.DeltaResult
 	syncingMap        map[string]bool
 	dirtyDuringSync   map[string]bool

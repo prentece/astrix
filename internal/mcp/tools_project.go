@@ -57,4 +57,3 @@ func registerProjectTools(s *server.MCPServer, projectService *service.ProjectSe
 		return mcp.NewToolResultText(prependWarning(output, warn)), nil
 	}))
 }
-

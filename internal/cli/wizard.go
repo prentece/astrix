@@ -28,7 +28,7 @@ func RunWizard(projService *service.ProjectService, ctx *ProjectContext) error {
 	}
 
 	var selectedAgentStrings []string
-	var confirmSetup bool = true
+	confirmSetup := true
 
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -91,7 +91,6 @@ func RunWizard(projService *service.ProjectService, ctx *ProjectContext) error {
 		indexedProj = indexed
 		return nil
 	})
-
 	if err != nil {
 		fmt.Println(ui.ErrorBox("Falha no Cadastro", err.Error()))
 		return err

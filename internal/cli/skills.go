@@ -77,21 +77,21 @@ func GenerateSkill(rootDir, agentID, projectID, projectName string) (string, err
 	}
 
 	destPath := filepath.Join(rootDir, target.FilePath)
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return "", fmt.Errorf("falha ao criar diretório para a skill: %w", err)
 	}
 
 	content := BuildSkillContent(agentID)
-	if err := os.WriteFile(destPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(destPath, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("falha ao gravar arquivo de skill em %s: %w", destPath, err)
 	}
 
 	if HasReferenceFile(agentID) {
 		refPath := filepath.Join(filepath.Dir(destPath), filepath.FromSlash(ReferenceRelPath))
-		if err := os.MkdirAll(filepath.Dir(refPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(refPath), 0o755); err != nil {
 			return "", fmt.Errorf("falha ao criar diretório de references: %w", err)
 		}
-		if err := os.WriteFile(refPath, []byte(BuildReferenceContent()), 0644); err != nil {
+		if err := os.WriteFile(refPath, []byte(BuildReferenceContent()), 0o644); err != nil {
 			return "", fmt.Errorf("falha ao gravar reference em %s: %w", refPath, err)
 		}
 	}
@@ -165,5 +165,3 @@ func removeIfEmpty(dir string) {
 		_ = os.Remove(dir)
 	}
 }
-
-

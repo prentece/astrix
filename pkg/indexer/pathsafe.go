@@ -46,9 +46,9 @@ func evalExistingPrefix(p string) (string, error) {
 	rest := ""
 	cur := p
 	for {
-		real, err := filepath.EvalSymlinks(cur)
+		realPath, err := filepath.EvalSymlinks(cur)
 		if err == nil {
-			return filepath.Join(real, rest), nil
+			return filepath.Join(realPath, rest), nil
 		}
 		if !os.IsNotExist(err) {
 			return "", err

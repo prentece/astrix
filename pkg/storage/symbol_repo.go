@@ -23,7 +23,7 @@ func (r *SymbolRepo) ClearProjectData(projectID string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := clearSymbolsTx(tx, projectID); err != nil {
 		return err
@@ -49,7 +49,7 @@ func (r *SymbolRepo) DeleteByFile(projectID, file string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`DELETE FROM symbols WHERE project_id = ? AND file = ?`, projectID, file); err != nil {
 		return err
@@ -71,7 +71,7 @@ func (r *SymbolRepo) SaveSymbols(projectID string, symbols []*Symbol) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := insertSymbolsTx(tx, projectID, symbols); err != nil {
 		return err
@@ -93,7 +93,7 @@ func insertSymbolsTx(tx *sql.Tx, projectID string, symbols []*Symbol) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, s := range symbols {
 		_, err := stmt.Exec(
@@ -127,7 +127,7 @@ func (r *SymbolRepo) SaveReferences(projectID string, refs []*CallerInfo) error 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := insertReferencesTx(tx, projectID, refs); err != nil {
 		return err
@@ -149,7 +149,7 @@ func insertReferencesTx(tx *sql.Tx, projectID string, refs []*CallerInfo) error 
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, ref := range refs {
 		_, err := stmt.Exec(
@@ -194,7 +194,7 @@ func (r *SymbolRepo) FindSymbol(projectID, symbolName string, limit, offset int)
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []*Symbol
 	for rows.Next() {
@@ -292,7 +292,7 @@ func (r *SymbolRepo) FindReferences(projectID, symbolName string, limit, offset 
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var refs []*CallerInfo
 	for rows.Next() {
@@ -330,13 +330,13 @@ func (r *SymbolRepo) UpdateRelevanceScores(projectID string, symbolScores map[in
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`UPDATE symbols SET relevance_score = ? WHERE id = ? AND project_id = ?`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for id, score := range symbolScores {
 		if _, err := stmt.Exec(score, id, projectID); err != nil {
@@ -359,7 +359,7 @@ func (r *SymbolRepo) GetFileImportCounts(projectID string) (map[string]int, erro
 		GROUP BY target_file
 	`, projectID)
 	if err == nil {
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var file string
 			var count int
@@ -385,7 +385,7 @@ func (r *SymbolRepo) GetSymbolReferenceCounts(projectID string) (map[string]int,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var name string
@@ -409,7 +409,7 @@ func (r *SymbolRepo) GetAllSymbolsForRanking(projectID string) ([]*Symbol, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []*Symbol
 	for rows.Next() {
@@ -452,7 +452,7 @@ func (r *SymbolRepo) GetSymbolsByFileAndLineRange(projectID, file string, startL
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []*Symbol
 	for rows.Next() {
@@ -492,7 +492,7 @@ func (r *SymbolRepo) GetSymbolCountsByFile(projectID string) ([]*FileSymbolStats
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var stats []*FileSymbolStats
 	for rows.Next() {
@@ -529,7 +529,7 @@ func (r *SymbolRepo) GetSymbolCountsByFile(projectID string) ([]*FileSymbolStats
 		if err != nil {
 			return nil, err
 		}
-		defer legRows.Close()
+		defer func() { _ = legRows.Close() }()
 
 		for legRows.Next() {
 			var s FileSymbolStats

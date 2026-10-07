@@ -28,7 +28,6 @@ type ProjectRepository interface {
 	Delete(id string) error
 }
 
-
 // DependencyGraphRepository abstrai a persistência e consulta do grafo de dependências arquiteturais.
 type DependencyGraphRepository interface {
 	SaveDependencies(projectID string, edges []*DependencyEdge) error
@@ -51,7 +50,6 @@ type DataModelRepository interface {
 	DeleteByFile(projectID, file string) error
 	ClearProjectDataModels(projectID string) error
 }
-
 
 // FileStateRepository abstrai o armazenamento de estado e hashes de arquivos para indexação delta.
 type FileStateRepository interface {

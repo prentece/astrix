@@ -134,4 +134,3 @@ func PrintMCPHelp() {
 	fmt.Println("    config  Exibe a configuração JSON (flags: --absolute, --npx)")
 	fmt.Println()
 }
-

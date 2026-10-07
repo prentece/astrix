@@ -1,8 +1,8 @@
 package mcp
 
 import (
-	"astrix/pkg/indexer"
 	"astrix/internal/service"
+	"astrix/pkg/indexer"
 	"context"
 	"fmt"
 

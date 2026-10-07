@@ -10,11 +10,11 @@ import (
 
 // CodeService gerencia operações de inteligência de código, AST, busca semântica e leitura cirúrgica.
 type CodeService struct {
-	projectRepo    storage.ProjectRepository
-	symbolRepo     storage.SymbolRepository
-	depRepo        storage.DependencyGraphRepository
-	dataModelRepo  storage.DataModelRepository
-	engine         *indexer.Engine
+	projectRepo   storage.ProjectRepository
+	symbolRepo    storage.SymbolRepository
+	depRepo       storage.DependencyGraphRepository
+	dataModelRepo storage.DataModelRepository
+	engine        *indexer.Engine
 }
 
 // NewCodeService cria uma nova instância de CodeService.
@@ -302,7 +302,6 @@ func (s *CodeService) QueryStructuredFile(projectID, filePath, query string) (st
 	return indexer.QueryStructuredFile(proj.Path, relPath, query)
 }
 
-
 // ArchitectureGraphNode representa um nó na árvore do grafo de dependências arquiteturais.
 type ArchitectureGraphNode struct {
 	Symbol       string                   `json:"symbol"`
@@ -436,7 +435,6 @@ func (s *CodeService) ListDataModels(projectID string) ([]*storage.DataModel, er
 
 	return s.dataModelRepo.ListByProject(projectID)
 }
-
 
 // GetSymbolStats retorna estatísticas de mapeamento de símbolos por arquivo para a tela de mapeamento.
 func (s *CodeService) GetSymbolStats(projectID string) ([]*storage.FileSymbolStats, error) {

@@ -55,7 +55,7 @@ The Service layer SHALL prevent path traversal vulnerabilities when reading file
 
 #### Scenario: Client requests a file path with parent directory navigation
 - **GIVEN** a request with `filepath = "../../../etc/passwd"`
-- **WHEN** `CodeService.ReadFileLines`, `CodeService.GetImplementation`, `CodeService.GrepCode` (via `path_prefix`), `CodeService.QueryStructuredFile`, or the directory tree builders are called
+- **WHEN** `CodeService.PeekFile` (implementing MCP `read_file_lines`), `CodeService.GetImplementation`, `CodeService.GrepCode` (via `path_prefix`), `CodeService.QueryStructuredFile`, or the directory tree builders are called
 - **THEN** the service SHALL resolve the target path against the project root directory
 - **AND** if the target path falls outside the project root, the service SHALL reject the request with an `ErrPathOutsideRoot` error without reading the file
 
@@ -77,6 +77,6 @@ The Service layer SHALL validate requested line boundaries against actual file l
 
 #### Scenario: Client requests lines beyond the end of a file
 - **GIVEN** a file with 50 total lines and a request for `start_line = 60` and `end_line = 100`
-- **WHEN** `CodeService.ReadFileLines` is called
+- **WHEN** `CodeService.PeekFile` (implementing MCP `read_file_lines`) is called
 - **THEN** the service SHALL detect that `start_line` exceeds the file length
 - **AND** it SHALL return a descriptive out-of-bounds error instead of an internal crash

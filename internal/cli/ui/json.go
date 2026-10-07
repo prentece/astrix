@@ -8,11 +8,11 @@ import (
 
 // FormatJSONHighlight aplica syntax highlighting limpo e minimalista a um snippet JSON.
 func FormatJSONHighlight(rawJSON string) string {
-	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorError)    // Vermelho (Calças do Asterix)
-	stringStyle := lipgloss.NewStyle().Foreground(ColorPrimary)         // Amarelo (Cabelo e Bigode)
-	punctStyle := lipgloss.NewStyle().Foreground(ColorDarkMuted)        // Cinzento escuro (sem poluição)
-	numBoolStyle := lipgloss.NewStyle().Foreground(ColorGold)           // Dourado (Tachas)
-	valStyle := lipgloss.NewStyle().Foreground(ColorText)               // Branco brilhante
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorError) // Vermelho (Calças do Asterix)
+	stringStyle := lipgloss.NewStyle().Foreground(ColorPrimary)       // Amarelo (Cabelo e Bigode)
+	punctStyle := lipgloss.NewStyle().Foreground(ColorDarkMuted)      // Cinzento escuro (sem poluição)
+	numBoolStyle := lipgloss.NewStyle().Foreground(ColorGold)         // Dourado (Tachas)
+	valStyle := lipgloss.NewStyle().Foreground(ColorText)             // Branco brilhante
 
 	lines := strings.Split(strings.TrimRight(rawJSON, "\n"), "\n")
 	var formattedLines []string

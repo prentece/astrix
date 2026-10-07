@@ -92,7 +92,6 @@ type GrepMatch struct {
 	ContextAfter  []string `json:"context_after,omitempty"`
 }
 
-
 // DependencyEdge representa um arco no grafo de dependências e injeção do projeto.
 type DependencyEdge struct {
 	ID               int64     `json:"id"`
@@ -125,7 +124,6 @@ type DataModel struct {
 	Fields           []*ModelField `json:"fields"`
 	CreatedAt        time.Time     `json:"created_at"`
 }
-
 
 // IndexingProgress representa o progresso em tempo real da indexação de um repositório.
 type IndexingProgress struct {

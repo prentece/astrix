@@ -314,3 +314,123 @@ func serviceNewCodeService(repo storage.ProjectRepository, sym storage.SymbolRep
 func newServerWithVersion(p *service.ProjectService, c *service.CodeService, v string) *mcp.Server {
 	return mcp.NewServer(p, c, v)
 }
+
+func TestMCPServer_SafeJoinProtection(t *testing.T) {
+	// Cria raiz pai com subdiretório de projeto e arquivo externo confidencial
+	baseDir := t.TempDir()
+	outsideSecret := filepath.Join(baseDir, "outside_secret.txt")
+	err := os.WriteFile(outsideSecret, []byte("SUPER_SECRET_TOKEN=12345\n"), 0o644)
+	require.NoError(t, err)
+
+	projectDir := filepath.Join(baseDir, "myproject")
+	err = os.Mkdir(projectDir, 0o755)
+	require.NoError(t, err)
+
+	// Arquivo legítimo dentro do projeto
+	err = os.WriteFile(filepath.Join(projectDir, "main.go"), []byte("package main\n\nfunc Run() {}\n"), 0o644)
+	require.NoError(t, err)
+
+	// Symlink dentro do projeto apontando para o arquivo externo
+	symlinkPath := filepath.Join(projectDir, "symlink_secret.txt")
+	err = os.Symlink(outsideSecret, symlinkPath)
+	require.NoError(t, err)
+
+	tempDB := t.TempDir() + "/safejoin_test.db"
+	database, err := storage.NewDatabase(tempDB)
+	require.NoError(t, err)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	symbolRepo := storage.NewSymbolRepo(database)
+	depRepo := storage.NewDependencyGraphRepo(database)
+	dataModelRepo := storage.NewDataModelRepo(database)
+
+	proj := &storage.Project{
+		ID:       "proj-safejoin",
+		Name:     "SafeJoin Test",
+		Path:     projectDir,
+		Language: "go",
+		Status:   storage.StatusReady,
+	}
+	err = projectRepo.Create(proj)
+	require.NoError(t, err)
+
+	engine := indexer.NewEngine(projectRepo, symbolRepo, depRepo, dataModelRepo)
+	engine.SetIndexReplacer(storage.NewIndexStore(database))
+	err = engine.IndexProject(proj.ID)
+	require.NoError(t, err)
+
+	projectService := serviceNewProjectService(projectRepo, symbolRepo, engine)
+	codeService := serviceNewCodeService(projectRepo, symbolRepo, depRepo, dataModelRepo, engine)
+	mcpServer := newServerWithVersion(projectService, codeService, "0.1.0")
+
+	// 1. Testar read_file_lines com path traversal lexical ("../outside_secret.txt")
+	callTool := func(toolName string, args map[string]any) map[string]any {
+		payload := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      toolName,
+				"arguments": args,
+			},
+		}
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/mcp/message", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		mcpServer.HandleMessage()(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		jsonErr := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, jsonErr)
+		result, ok := resp["result"].(map[string]any)
+		require.True(t, ok, "resposta deve conter result")
+		return result
+	}
+
+	// Traversal lexical via read_file_lines
+	res := callTool("read_file_lines", map[string]any{
+		"project_id": "proj-safejoin",
+		"filepath":   "../outside_secret.txt",
+	})
+	assert.Equal(t, true, res["isError"], "deve retornar isError=true")
+	contentList, _ := res["content"].([]any)
+	require.NotEmpty(t, contentList)
+	firstItem := contentList[0].(map[string]any)
+	errorText := firstItem["text"].(string)
+	assert.Contains(t, errorText, "caminho fora da raiz do projeto")
+	assert.NotContains(t, errorText, "SUPER_SECRET_TOKEN")
+
+	// Symlink escapista via read_file_lines
+	resSymlink := callTool("read_file_lines", map[string]any{
+		"project_id": "proj-safejoin",
+		"filepath":   "symlink_secret.txt",
+	})
+	assert.Equal(t, true, resSymlink["isError"], "deve retornar isError=true para symlink externo")
+	contentListSym, _ := resSymlink["content"].([]any)
+	require.NotEmpty(t, contentListSym)
+	firstItemSym := contentListSym[0].(map[string]any)
+	errorTextSym := firstItemSym["text"].(string)
+	assert.Contains(t, errorTextSym, "caminho fora da raiz do projeto")
+	assert.NotContains(t, errorTextSym, "SUPER_SECRET_TOKEN")
+
+	// Traversal lexical via get_implementation
+	resImpl := callTool("get_implementation", map[string]any{
+		"project_id":  "proj-safejoin",
+		"filepath":    "../outside_secret.txt",
+		"symbol_name": "AnySymbol",
+	})
+	assert.Equal(t, true, resImpl["isError"], "deve retornar isError=true no get_implementation com traversal")
+
+	// Leitura legítima dentro do projeto deve funcionar normalmente
+	resLegit := callTool("read_file_lines", map[string]any{
+		"project_id": "proj-safejoin",
+		"filepath":   "main.go",
+	})
+	assert.NotEqual(t, true, resLegit["isError"], "leitura de arquivo legítimo não deve falhar")
+	contentListLegit, _ := resLegit["content"].([]any)
+	require.NotEmpty(t, contentListLegit)
+	firstItemLegit := contentListLegit[0].(map[string]any)
+	assert.Contains(t, firstItemLegit["text"].(string), "func Run()")
+}

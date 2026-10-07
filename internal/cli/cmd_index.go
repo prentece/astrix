@@ -40,7 +40,6 @@ func PrintIndex(projService *service.ProjectService, showBanner bool) error {
 		proj = p
 		return nil
 	})
-
 	if err != nil {
 		fmt.Println(ui.ErrorBox("Falha na Indexação", err.Error()))
 		return err

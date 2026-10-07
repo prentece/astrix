@@ -23,7 +23,7 @@ The Storage layer SHALL ensure that all required tables and indexes exist upon c
 #### Scenario: Running migrations on a fresh or existing database
 - **GIVEN** `NewDatabase(dbPath)` is called
 - **WHEN** `migrate()` executes
-- **THEN** the schema tables (`projects`, `symbols`, `dependency_graphs`, `data_models`, `file_states`) and their indexes SHALL be created idempotently using `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`
+- **THEN** the schema tables (`projects`, `symbols`, `dependency_graph`, `data_models`, `project_file_states`) and their indexes SHALL be created idempotently using `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`
 
 ---
 
@@ -33,7 +33,7 @@ The Storage layer SHALL guarantee that deleting a project cascades to all child 
 #### Scenario: Project is deleted from database
 - **GIVEN** a project with ID `proj-123` has thousands of indexed symbols, edges, data models, and file states
 - **WHEN** `projectRepo.Delete("proj-123")` is executed
-- **THEN** SQLite foreign keys SHALL automatically delete all associated records in `symbols`, `dependency_graphs`, `data_models`, and `file_states` in a single transaction
+- **THEN** SQLite foreign keys SHALL automatically delete all associated records in `symbols`, `dependency_graph`, `data_models`, and `project_file_states` in a single transaction
 
 ---
 
@@ -42,7 +42,7 @@ The Storage layer SHALL persist symbols and dependency edges in atomic transacti
 
 #### Scenario: Indexer saves thousands of symbols
 - **GIVEN** a batch of newly extracted symbols from an indexed project
-- **WHEN** `symbolRepo.SaveBatch(symbols)` is executed
+- **WHEN** `symbolRepo.SaveSymbols(projectID, symbols)` is executed
 - **THEN** all symbols SHALL be inserted inside an explicit `BeginTx` transaction
 - **AND** if an error occurs during insertion, the transaction SHALL be rolled back completely
 
@@ -90,4 +90,4 @@ The Storage layer SHALL recover projects that remained in the `indexing` status 
 #### Scenario: System crashed during previous indexing run
 - **GIVEN** a project was left in `status = 'indexing'` when the process was killed
 - **WHEN** Astrix initializes via `Execute()` and calls `ResetDanglingIndexingStatus()`
-- **THEN** the project status SHALL be automatically reset to `pending` or `error` with a descriptive message
+- **THEN** the project status SHALL be automatically reset to `ready` with an informative error message explaining that the previous indexing was interrupted

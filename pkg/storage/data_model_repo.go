@@ -39,7 +39,7 @@ func (r *DataModelRepo) SaveDataModels(projectID string, modelsList []*DataModel
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := insertDataModelsTx(tx, projectID, modelsList); err != nil {
 		return err
@@ -61,7 +61,7 @@ func insertDataModelsTx(tx *sql.Tx, projectID string, modelsList []*DataModel) e
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	now := time.Now()
 	for _, m := range modelsList {
@@ -141,7 +141,7 @@ func (r *DataModelRepo) ListByProject(projectID string) ([]*DataModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*DataModel
 	for rows.Next() {
@@ -194,7 +194,7 @@ func (r *DataModelRepo) ListDataModels(projectID string, limit, offset int) ([]*
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*DataModel
 	for rows.Next() {

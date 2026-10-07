@@ -189,7 +189,7 @@ func waitForReturn() {
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err == nil {
-		defer term.Restore(int(os.Stdin.Fd()), oldState)
+		defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 		var buf [1]byte
 		_, _ = os.Stdin.Read(buf[:])
 		return
@@ -197,4 +197,3 @@ func waitForReturn() {
 	var buf [1]byte
 	_, _ = os.Stdin.Read(buf[:])
 }
-

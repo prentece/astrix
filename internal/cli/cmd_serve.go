@@ -30,7 +30,7 @@ func RunServe(
 	logPath, err := GetLogPath()
 	if err == nil {
 		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-			defer logFile.Close()
+			defer func() { _ = logFile.Close() }()
 			log.SetOutput(logFile)
 		} else {
 			log.SetOutput(io.Discard)

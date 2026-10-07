@@ -158,5 +158,3 @@ func WithArray(name string, itemSchema map[string]any, description string, requi
 		}
 	}
 }
-
-

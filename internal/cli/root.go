@@ -42,7 +42,7 @@ func Execute() error {
 	if logPath, err := GetLogPath(); err == nil {
 		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
 			log.SetOutput(logFile)
-			defer logFile.Close()
+			defer func() { _ = logFile.Close() }()
 		} else {
 			log.SetOutput(io.Discard)
 		}
@@ -55,7 +55,7 @@ func Execute() error {
 	if err != nil {
 		log.Fatalf("[FATAL] Falha ao inicializar banco de dados: %v\n", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	projectRepo := storage.NewProjectRepo(database)
 
@@ -71,7 +71,9 @@ func Execute() error {
 
 	engine := indexer.NewEngine(projectRepo, symbolRepo, depRepo, dataModelRepo)
 	engine.SetFileStateRepo(fileStateRepo)
-	engine.SetIndexReplacer(storage.NewIndexStore(database))
+	indexStore := storage.NewIndexStore(database)
+	engine.SetIndexReplacer(indexStore)
+	engine.SetIncrementalApplier(indexStore)
 
 	projectService := service.NewProjectService(projectRepo, symbolRepo, engine)
 	codeService := service.NewCodeService(projectRepo, symbolRepo, depRepo, dataModelRepo, engine)

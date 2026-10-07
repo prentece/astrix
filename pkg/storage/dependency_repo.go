@@ -39,7 +39,7 @@ func (r *DependencyGraphRepo) SaveDependencies(projectID string, edges []*Depend
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := insertDependenciesTx(tx, projectID, edges); err != nil {
 		return err
@@ -61,7 +61,7 @@ func insertDependenciesTx(tx *sql.Tx, projectID string, edges []*DependencyEdge)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	now := time.Now()
 	for _, edge := range edges {
@@ -128,7 +128,7 @@ func (r *DependencyGraphRepo) UpdateTargetFiles(projectID string, symbolToFileMa
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`
 		UPDATE dependency_graph
@@ -138,7 +138,7 @@ func (r *DependencyGraphRepo) UpdateTargetFiles(projectID string, symbolToFileMa
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for sym, file := range symbolToFileMap {
 		if file != "" {
@@ -179,13 +179,13 @@ func (r *DependencyGraphRepo) ResolveTargetFiles(projectID string, symbols []*Sy
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`UPDATE dependency_graph SET target_file = ? WHERE id = ?`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	updatedCount := 0
 	for _, edge := range unresolvedEdges {
@@ -280,7 +280,7 @@ func (r *DependencyGraphRepo) queryEdges(query string, args ...any) ([]*Dependen
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var edges []*DependencyEdge
 	for rows.Next() {

@@ -71,7 +71,7 @@ func (r *ProjectRepo) ListAll() ([]*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var projects []*Project
 	for rows.Next() {
@@ -126,7 +126,7 @@ func (r *ProjectRepo) Delete(id string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Remove o registro do projeto (symbols, references, etc. deletados via FK CASCADE)
 	if _, err := tx.Exec("DELETE FROM projects WHERE id = ?", id); err != nil {

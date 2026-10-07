@@ -57,7 +57,7 @@ func (s *IndexStore) ReplaceProjectIndex(snap *IndexSnapshot) error {
 	if err != nil {
 		return fmt.Errorf("falha ao iniciar transação de reindexação: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := clearSymbolsTx(tx, snap.ProjectID); err != nil {
 		return fmt.Errorf("falha ao limpar símbolos: %w", err)
@@ -105,7 +105,7 @@ func (s *IndexStore) ApplyIncrementalDelta(delta *IncrementalIndexDelta) error {
 	if err != nil {
 		return fmt.Errorf("falha ao iniciar transação incremental: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// 1. Limpa símbolos, referências, dependências e modelos dos arquivos deletados e modificados
 	filesToClear := append([]string{}, delta.DeletedFiles...)
@@ -156,4 +156,3 @@ func (s *IndexStore) ApplyIncrementalDelta(delta *IncrementalIndexDelta) error {
 
 	return tx.Commit()
 }
-

@@ -43,3 +43,6 @@ build-errors.log
 
 #Agents skills
 .agents/skills/**
+
+#Todo
+.todo
