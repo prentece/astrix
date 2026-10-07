@@ -330,10 +330,13 @@ func TestMCPServer_SafeJoinProtection(t *testing.T) {
 	err = os.WriteFile(filepath.Join(projectDir, "main.go"), []byte("package main\n\nfunc Run() {}\n"), 0o644)
 	require.NoError(t, err)
 
-	// Symlink dentro do projeto apontando para o arquivo externo
+	// Symlink dentro do projeto apontando para o arquivo externo (pode falhar no Windows sem permissões)
 	symlinkPath := filepath.Join(projectDir, "symlink_secret.txt")
-	err = os.Symlink(outsideSecret, symlinkPath)
-	require.NoError(t, err)
+	symlinkAvailable := true
+	if err := os.Symlink(outsideSecret, symlinkPath); err != nil {
+		symlinkAvailable = false
+		t.Logf("symlink indisponível no ambiente de teste (ex: Windows sem privilégios): %v", err)
+	}
 
 	tempDB := t.TempDir() + "/safejoin_test.db"
 	database, err := storage.NewDatabase(tempDB)
@@ -403,17 +406,19 @@ func TestMCPServer_SafeJoinProtection(t *testing.T) {
 	assert.NotContains(t, errorText, "SUPER_SECRET_TOKEN")
 
 	// Symlink escapista via read_file_lines
-	resSymlink := callTool("read_file_lines", map[string]any{
-		"project_id": "proj-safejoin",
-		"filepath":   "symlink_secret.txt",
-	})
-	assert.Equal(t, true, resSymlink["isError"], "deve retornar isError=true para symlink externo")
-	contentListSym, _ := resSymlink["content"].([]any)
-	require.NotEmpty(t, contentListSym)
-	firstItemSym := contentListSym[0].(map[string]any)
-	errorTextSym := firstItemSym["text"].(string)
-	assert.Contains(t, errorTextSym, "caminho fora da raiz do projeto")
-	assert.NotContains(t, errorTextSym, "SUPER_SECRET_TOKEN")
+	if symlinkAvailable {
+		resSymlink := callTool("read_file_lines", map[string]any{
+			"project_id": "proj-safejoin",
+			"filepath":   "symlink_secret.txt",
+		})
+		assert.Equal(t, true, resSymlink["isError"], "deve retornar isError=true para symlink externo")
+		contentListSym, _ := resSymlink["content"].([]any)
+		require.NotEmpty(t, contentListSym)
+		firstItemSym := contentListSym[0].(map[string]any)
+		errorTextSym := firstItemSym["text"].(string)
+		assert.Contains(t, errorTextSym, "caminho fora da raiz do projeto")
+		assert.NotContains(t, errorTextSym, "SUPER_SECRET_TOKEN")
+	}
 
 	// Traversal lexical via get_implementation
 	resImpl := callTool("get_implementation", map[string]any{

@@ -35,6 +35,23 @@ func TestCheckProjectWarning(t *testing.T) {
 	// Mock manual via prependWarning
 	assert.Equal(t, "content", prependWarning("content", ""))
 	assert.Equal(t, "[WARN]\n\ncontent", prependWarning("content", "[WARN]"))
+
+	// toolResultWithWarning mantém o JSON intacto em bloco de texto separado
+	jsonPayload := `{"status":"ok"}`
+	resNoWarn := toolResultWithWarning(jsonPayload, "")
+	require.Len(t, resNoWarn.Content, 1)
+	tcNoWarn, ok := resNoWarn.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, jsonPayload, tcNoWarn.Text)
+
+	resWithWarn := toolResultWithWarning(jsonPayload, "[INDEXING]")
+	require.Len(t, resWithWarn.Content, 2)
+	tcWarn, ok := resWithWarn.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "[INDEXING]", tcWarn.Text)
+	tcBody, ok := resWithWarn.Content[1].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, jsonPayload, tcBody.Text)
 }
 
 func TestGetFilePathParam_Aliases(t *testing.T) {

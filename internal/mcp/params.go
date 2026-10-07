@@ -134,7 +134,21 @@ func checkProjectWarning(codeService *service.CodeService, projectID string) str
 	return ""
 }
 
-// prependWarning prefixa o aviso de estado ao texto retornado caso exista.
+// toolResultWithWarning retorna um CallToolResult com o payload principal e, caso exista warning,
+// inclui o aviso como um bloco TextContent separado no MCP, garantindo que payloads JSON não sejam corrompidos.
+func toolResultWithWarning(text, warning string) *mcp.CallToolResult {
+	if warning == "" {
+		return mcp.NewToolResultText(text)
+	}
+	return &mcp.CallToolResult{
+		Content: []interface{}{
+			mcp.NewTextContent(warning),
+			mcp.NewTextContent(text),
+		},
+	}
+}
+
+// prependWarning prefixa o aviso de estado ao texto retornado caso exista (fallback para texto puro).
 func prependWarning(text, warning string) string {
 	if warning == "" {
 		return text
@@ -152,6 +166,30 @@ func WithArray(name string, itemSchema map[string]any, description string, requi
 			"type":        "array",
 			"items":       itemSchema,
 			"description": description,
+		}
+		if required {
+			t.InputSchema.Required = append(t.InputSchema.Required, name)
+		}
+	}
+}
+
+// WithArrayOrString define um schema que aceita tanto um array de objetos quanto uma string (JSON serializada).
+func WithArrayOrString(name string, itemSchema map[string]any, description string, required bool) mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		if t.InputSchema.Properties == nil {
+			t.InputSchema.Properties = make(map[string]interface{})
+		}
+		t.InputSchema.Properties[name] = map[string]interface{}{
+			"description": description,
+			"oneOf": []interface{}{
+				map[string]interface{}{
+					"type":  "array",
+					"items": itemSchema,
+				},
+				map[string]interface{}{
+					"type": "string",
+				},
+			},
 		}
 		if required {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)

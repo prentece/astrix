@@ -94,7 +94,14 @@ func (d *DeltaEngine) DetectDeltaForFiles(projectID, projectPath string, candida
 		} else if state.MTime != mtime || state.FileSize != size {
 			result.ModifiedFiles = append(result.ModifiedFiles, relPath)
 		} else {
-			result.UnchangedCount++
+			// Se o stat for idêntico mas o arquivo foi notificado como candidato pelo watcher,
+			// verifica o hash do conteúdo para detectar edições in-place no mesmo segundo com mesmo tamanho.
+			content, err := os.ReadFile(absPath)
+			if err == nil && calculateHash(content) != state.ContentHash {
+				result.ModifiedFiles = append(result.ModifiedFiles, relPath)
+			} else {
+				result.UnchangedCount++
+			}
 		}
 	}
 

@@ -112,6 +112,7 @@ func (s *ProjectService) RegisterProject(name, path, language string) (*storage.
 	if name == "" {
 		return nil, errors.New("o campo 'name' é obrigatório")
 	}
+	language = strings.ToLower(strings.TrimSpace(language))
 	if language == "" || language == "auto" {
 		if detLang != "" && detLang != "auto" {
 			language = detLang

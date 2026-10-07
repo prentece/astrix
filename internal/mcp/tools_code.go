@@ -56,7 +56,7 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to find symbol definition: %v", err)), nil
 			}
-			return mcp.NewToolResultText(prependWarning(FormatSymbols(symbols, asJSON, limit, offset, hasMore), warn)), nil
+			return toolResultWithWarning(FormatSymbols(symbols, asJSON, limit, offset, hasMore), warn), nil
 		}
 
 		// mode == "references"
@@ -68,7 +68,7 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 		if len(refs) == 0 {
 			result += "\n[HINT] No references found via AST index. For class-level symbols (types, interfaces), try grep_code as fallback: grep_code(pattern=\"<SymbolName>\")."
 		}
-		return mcp.NewToolResultText(prependWarning(result, warn)), nil
+		return toolResultWithWarning(result, warn), nil
 	}))
 
 	// 2. Tool: get_implementation
@@ -105,14 +105,14 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 		}
 
 		warn := checkProjectWarning(codeService, projectID)
-		return mcp.NewToolResultText(prependWarning(FormatImplementation(symbolName, filePath, impl, asJSON), warn)), nil
+		return toolResultWithWarning(FormatImplementation(symbolName, filePath, impl, asJSON), warn), nil
 	}))
 
 	// 3. Tool: read_file_lines
 	readFileLinesTool := mcp.NewTool("read_file_lines",
 		mcp.WithDescription("Reads and inspects code or text files within a specified line window, with enclosing symbol context and optional symbol anchor."),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Read it from '.astrix/config.json' (field 'id') for the current project; for any other project, call list_projects.")),
-		mcp.WithString("filepath", mcp.Required(), mcp.Description("Relative filepath to read (e.g. 'internal/web/handler.go').")),
+		mcp.WithString("filepath", mcp.Description("Relative filepath to read (e.g. 'internal/web/handler.go'). Either filepath or path is required.")),
 		mcp.WithString("path", mcp.Description("Alternative alias for filepath.")),
 		mcp.WithNumber("start_line", mcp.Description("1-indexed starting line number (optional, default 1). Ignored when anchor_symbol is provided.")),
 		mcp.WithNumber("end_line", mcp.Description("1-indexed ending line number (optional, default start_line + 49, max window 100 lines). Ignored when anchor_symbol is provided.")),
@@ -142,7 +142,7 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 		}
 
 		warn := checkProjectWarning(codeService, projectID)
-		return mcp.NewToolResultText(prependWarning(FormatPeekFile(filePath, startLine, endLine, anchorSymbol, content, asJSON), warn)), nil
+		return toolResultWithWarning(FormatPeekFile(filePath, startLine, endLine, anchorSymbol, content, asJSON), warn), nil
 	}))
 
 	// 4. Tool: grep_code
@@ -195,14 +195,14 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 		}
 
 		warn := checkProjectWarning(codeService, projectID)
-		return mcp.NewToolResultText(prependWarning(FormatGrepMatches(pattern, matches, asJSON, maxResults, offset, hasMore), warn)), nil
+		return toolResultWithWarning(FormatGrepMatches(pattern, matches, asJSON, maxResults, offset, hasMore), warn), nil
 	}))
 
 	// 5. Tool: query_structured_file
 	queryStructuredTool := mcp.NewTool("query_structured_file",
 		mcp.WithDescription("Inspect and query specific nodes in structured files (JSON, YAML, CSV). For JSON uses GJSON path (e.g. 'dependencies.@nestjs/core'), for YAML uses dot notation (e.g. 'services.postgres.ports'), for CSV uses filter expressions."),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Read it from '.astrix/config.json' (field 'id') for the current project; for any other project, call list_projects.")),
-		mcp.WithString("filepath", mcp.Required(), mcp.Description("Relative filepath to the structured file (e.g. 'package.json', 'docker-compose.yml', 'data.csv').")),
+		mcp.WithString("filepath", mcp.Description("Relative filepath to the structured file (e.g. 'package.json', 'docker-compose.yml', 'data.csv'). Either filepath or path is required.")),
 		mcp.WithString("path", mcp.Description("Alternative alias for filepath.")),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search path / filter query expression (JSON: GJSON path, YAML: dot-path, CSV: filter or columns).")),
 		mcp.WithString("format", mcp.Description("Output format: 'text' (default) or 'json'.")),
@@ -232,14 +232,14 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 		}
 
 		warn := checkProjectWarning(codeService, projectID)
-		return mcp.NewToolResultText(prependWarning(FormatStructuredFileResult(filePath, query, res, asJSON), warn)), nil
+		return toolResultWithWarning(FormatStructuredFileResult(filePath, query, res, asJSON), warn), nil
 	}))
 
 	// 6. Tool: get_implementation_bundle
 	bundleTool := mcp.NewTool("get_implementation_bundle",
 		mcp.WithDescription("Fetches AST implementations of multiple symbols in a single call. Returns all results with partial error reporting for missing symbols."),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Read it from '.astrix/config.json' (field 'id') for the current project; for any other project, call list_projects.")),
-		WithArray("symbols", map[string]any{
+		WithArrayOrString("symbols", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"filepath":    map[string]any{"type": "string", "description": "Relative path to file"},
@@ -289,14 +289,14 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 		}
 
 		warn := checkProjectWarning(codeService, projectID)
-		return mcp.NewToolResultText(prependWarning(FormatImplementationBundle(results, asJSON), warn)), nil
+		return toolResultWithWarning(FormatImplementationBundle(results, asJSON), warn), nil
 	}))
 
 	// 7. Tool: get_file_outline
 	fileOutlineTool := mcp.NewTool("get_file_outline",
 		mcp.WithDescription("Returns an outline of all declarations (classes, functions, methods, interfaces, structs) in a file with line numbers and signatures, without returning full code bodies."),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("The ID of the project. Read it from '.astrix/config.json' (field 'id') for the current project; for any other project, call list_projects.")),
-		mcp.WithString("filepath", mcp.Required(), mcp.Description("Relative filepath within the project (e.g. 'internal/mcp/server.go').")),
+		mcp.WithString("filepath", mcp.Description("Relative filepath within the project (e.g. 'internal/mcp/server.go'). Either filepath or path is required.")),
 		mcp.WithString("path", mcp.Description("Alternative alias for filepath.")),
 		mcp.WithString("format", mcp.Description("Output format: 'text' (default, indented outline) or 'json'.")),
 	)
@@ -320,6 +320,6 @@ func registerCodeTools(s *server.MCPServer, codeService *service.CodeService) {
 		}
 
 		warn := checkProjectWarning(codeService, projectID)
-		return mcp.NewToolResultText(prependWarning(FormatFileOutline(filePath, syms, asJSON), warn)), nil
+		return toolResultWithWarning(FormatFileOutline(filePath, syms, asJSON), warn), nil
 	}))
 }

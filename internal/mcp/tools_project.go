@@ -54,6 +54,6 @@ func registerProjectTools(s *server.MCPServer, projectService *service.ProjectSe
 
 		output := FormatStructureTree(treeText, asJSON)
 		warn := checkProjectWarning(codeService, projectID)
-		return mcp.NewToolResultText(prependWarning(output, warn)), nil
+		return toolResultWithWarning(output, warn), nil
 	}))
 }

@@ -118,7 +118,7 @@ func (s *IndexStore) ApplyIncrementalDelta(delta *IncrementalIndexDelta) error {
 		if _, err := tx.Exec(`DELETE FROM references_table WHERE project_id = ? AND file = ?`, delta.ProjectID, file); err != nil {
 			return fmt.Errorf("falha ao deletar referências de %s: %w", file, err)
 		}
-		if _, err := tx.Exec(`DELETE FROM dependency_graph WHERE project_id = ? AND source_file = ?`, delta.ProjectID, file); err != nil {
+		if _, err := tx.Exec(`DELETE FROM dependency_graph WHERE project_id = ? AND (source_file = ? OR target_file = ?)`, delta.ProjectID, file, file); err != nil {
 			return fmt.Errorf("falha ao deletar dependências de %s: %w", file, err)
 		}
 		if _, err := tx.Exec(`DELETE FROM data_models WHERE project_id = ? AND file = ?`, delta.ProjectID, file); err != nil {

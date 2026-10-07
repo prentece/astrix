@@ -125,16 +125,13 @@ func runActiveWatch(
 		}
 	}
 
+	origWriter := log.Writer()
 	bridge := &terminalLogBridge{
 		logFile: logFile,
 	}
 	log.SetOutput(bridge)
 	defer func() {
-		if logFile != nil {
-			log.SetOutput(logFile)
-		} else {
-			log.SetOutput(io.Discard)
-		}
+		log.SetOutput(origWriter)
 	}()
 
 	if err := fileWatcher.Start(); err != nil {

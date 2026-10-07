@@ -41,6 +41,7 @@ type FileWatcherService struct {
 
 	ctx        context.Context
 	cancelFunc context.CancelFunc
+	running    bool
 }
 
 // NewFileWatcherService cria uma nova instância de FileWatcherService.
@@ -96,10 +97,15 @@ func (w *FileWatcherService) ensureWatcherLocked() error {
 // É idempotente e reinicializável caso Stop() tenha sido chamado previamente.
 func (w *FileWatcherService) Start() error {
 	w.mu.Lock()
+	if w.running {
+		w.mu.Unlock()
+		return nil
+	}
 	if err := w.ensureWatcherLocked(); err != nil {
 		w.mu.Unlock()
 		return err
 	}
+	w.running = true
 	w.mu.Unlock()
 
 	projects, err := w.projectRepo.ListAll()
@@ -125,6 +131,11 @@ func (w *FileWatcherService) Start() error {
 func (w *FileWatcherService) Stop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	if !w.running {
+		return
+	}
+	w.running = false
 
 	if w.cancelFunc != nil {
 		w.cancelFunc()
@@ -251,9 +262,15 @@ func (w *FileWatcherService) UnwatchProject(projectID string) {
 	}
 	w.mu.Unlock()
 
+	w.mu.RLock()
+	watcher := w.watcher
+	w.mu.RUnlock()
+
 	// Remove diretórios do fsnotify a partir do registro em memória (não falha se o disco foi alterado)
-	for _, dir := range dirsToRemove {
-		_ = w.watcher.Remove(dir)
+	if watcher != nil {
+		for _, dir := range dirsToRemove {
+			_ = watcher.Remove(dir)
+		}
 	}
 }
 
@@ -460,7 +477,9 @@ func (w *FileWatcherService) handleFsnotifyEvent(event fsnotify.Event) {
 		w.mu.Lock()
 		if dirSet, ok := w.watchedDirs[projectID]; ok && dirSet[eventPath] {
 			delete(dirSet, eventPath)
-			_ = w.watcher.Remove(eventPath)
+			if w.watcher != nil {
+				_ = w.watcher.Remove(eventPath)
+			}
 		}
 		w.mu.Unlock()
 	}
@@ -506,7 +525,15 @@ func (w *FileWatcherService) addDirectoryTree(projectID, dirPath string) {
 			return filepath.SkipDir
 		}
 
-		if err := w.watcher.Add(path); err == nil {
+		w.mu.RLock()
+		watcher := w.watcher
+		running := w.running
+		w.mu.RUnlock()
+		if !running || watcher == nil {
+			return nil
+		}
+
+		if err := watcher.Add(path); err == nil {
 			w.mu.Lock()
 			if dirSet, ok := w.watchedDirs[projectID]; ok {
 				dirSet[path] = true
