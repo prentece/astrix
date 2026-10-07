@@ -35,7 +35,7 @@ func NewDatabase(dbPath string) (*DB, error) {
 
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("falha ao aplicar migrações: %w", err)
 	}
 

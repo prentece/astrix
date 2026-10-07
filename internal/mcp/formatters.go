@@ -1,9 +1,9 @@
 package mcp
 
 import (
-	"bytes"
-	"astrix/pkg/storage"
 	"astrix/internal/service"
+	"astrix/pkg/storage"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -47,7 +47,7 @@ type PagedReferencesResponse struct {
 
 type PagedGrepResponse struct {
 	Matches    []storage.GrepMatch `json:"matches"`
-	Pagination PaginationInfo     `json:"pagination"`
+	Pagination PaginationInfo      `json:"pagination"`
 }
 
 // FormatSymbols compacta a lista de símbolos AST no formato grep/ctags ou JSON enxuto com paginação.
@@ -267,7 +267,6 @@ func ToCleanJSON(v any) string {
 	return strings.TrimRight(buf.String(), "\n")
 }
 
-
 // LeanProject representa a projeção ultra-enxuta de um projeto registrado.
 type LeanProject struct {
 	ID          string `json:"id"`
@@ -440,7 +439,6 @@ func FormatDataModel(model *storage.DataModel, asJSON bool) string {
 	return sb.String()
 }
 
-
 // FormatStructureTree formata a árvore do projeto em texto hierárquico ou JSON.
 func FormatStructureTree(treeText string, asJSON bool) string {
 	if asJSON {
@@ -538,14 +536,49 @@ func FormatImplementationBundle(results []service.BundleResult, asJSON bool) str
 			ok++
 		}
 	}
-	sb.WriteString(fmt.Sprintf("[Bundle: %d/%d symbols retrieved]\n\n", ok, total))
+	fmt.Fprintf(&sb, "[Bundle: %d/%d symbols retrieved]\n\n", ok, total)
 	for _, r := range results {
-		sb.WriteString(fmt.Sprintf("### %s :: %s\n", r.Filepath, r.SymbolName))
+		fmt.Fprintf(&sb, "### %s :: %s\n", r.Filepath, r.SymbolName)
 		if r.Error != "" {
-			sb.WriteString(fmt.Sprintf("ERROR: %s\n\n", r.Error))
+			fmt.Fprintf(&sb, "ERROR: %s\n\n", r.Error)
 		} else {
 			sb.WriteString(r.Code)
 			sb.WriteString("\n\n")
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// FormatFileOutline formata o outline estrutural de declarações de um arquivo.
+func FormatFileOutline(filePath string, symbols []*storage.Symbol, asJSON bool) string {
+	if len(symbols) == 0 {
+		return fmt.Sprintf("No symbols found in %s.", filePath)
+	}
+	if asJSON {
+		var list []LeanSymbol
+		for _, s := range symbols {
+			list = append(list, LeanSymbol{
+				File:      s.File,
+				StartLine: s.StartLine,
+				EndLine:   s.EndLine,
+				Kind:      string(s.Kind),
+				Name:      s.Name,
+				Signature: s.Signature,
+			})
+		}
+		return ToCleanJSON(map[string]any{"filepath": filePath, "symbols": list, "count": len(list)})
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Outline for %s (%d declarations):\n", filePath, len(symbols))
+	for _, s := range symbols {
+		lines := fmt.Sprintf("L%d", s.StartLine)
+		if s.EndLine > s.StartLine {
+			lines = fmt.Sprintf("L%d-%d", s.StartLine, s.EndLine)
+		}
+		fmt.Fprintf(&sb, "  %-8s %-12s %s\n", lines, s.Kind, s.Name)
+		if s.Signature != "" && s.Signature != s.Name {
+			fmt.Fprintf(&sb, "           sig: %s\n", s.Signature)
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")

@@ -21,8 +21,13 @@ type Server struct {
 func NewServer(
 	projectService *service.ProjectService,
 	codeService *service.CodeService,
+	version ...string,
 ) *Server {
-	mcpServer := server.NewMCPServer("astrix", "0.0.1")
+	ver := "0.1.0"
+	if len(version) > 0 && version[0] != "" {
+		ver = version[0]
+	}
+	mcpServer := server.NewMCPServer("astrix", ver)
 
 	s := &Server{
 		mcpServer:      mcpServer,

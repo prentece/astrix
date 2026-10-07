@@ -51,7 +51,7 @@ func (r *SQLFileStateRepository) ListByProject(projectID string) (map[string]*Pr
 	if err != nil {
 		return nil, fmt.Errorf("erro ao listar estados de arquivos do projeto %s: %w", projectID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	results := make(map[string]*ProjectFileState)
 	for rows.Next() {
@@ -98,7 +98,20 @@ func (r *SQLFileStateRepository) UpsertBatch(states []*ProjectFileState) error {
 	if err != nil {
 		return fmt.Errorf("erro ao iniciar transação para batch de estados: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
+
+	if err := upsertFileStatesTx(tx, states); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// upsertFileStatesTx insere ou atualiza estados de arquivo dentro de uma transação existente.
+func upsertFileStatesTx(tx *sql.Tx, states []*ProjectFileState) error {
+	if len(states) == 0 {
+		return nil
+	}
 
 	query := `INSERT INTO project_file_states (project_id, filepath, mtime, file_size, content_hash, digest_hash, last_indexed_at)
 	          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -112,15 +125,14 @@ func (r *SQLFileStateRepository) UpsertBatch(states []*ProjectFileState) error {
 	if err != nil {
 		return fmt.Errorf("erro ao preparar statement de batch de estados: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, s := range states {
 		if _, err := stmt.Exec(s.ProjectID, s.FilePath, s.MTime, s.FileSize, s.ContentHash, s.DigestHash); err != nil {
 			return fmt.Errorf("erro ao inserir estado do arquivo %s no batch: %w", s.FilePath, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // Delete remove o estado de um único arquivo.

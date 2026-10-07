@@ -23,16 +23,24 @@ func (r *SymbolRepo) ClearProjectData(projectID string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
+	if err := clearSymbolsTx(tx, projectID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// clearSymbolsTx remove símbolos e referências de um projeto dentro de uma transação existente.
+func clearSymbolsTx(tx *sql.Tx, projectID string) error {
 	if _, err := tx.Exec(`DELETE FROM symbols WHERE project_id = ?`, projectID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM references_table WHERE project_id = ?`, projectID); err != nil {
 		return err
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // DeleteByFile remove todos os símbolos e referências de um arquivo específico.
@@ -41,7 +49,7 @@ func (r *SymbolRepo) DeleteByFile(projectID, file string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`DELETE FROM symbols WHERE project_id = ? AND file = ?`, projectID, file); err != nil {
 		return err
@@ -63,7 +71,20 @@ func (r *SymbolRepo) SaveSymbols(projectID string, symbols []*Symbol) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
+
+	if err := insertSymbolsTx(tx, projectID, symbols); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertSymbolsTx insere símbolos em lote dentro de uma transação existente.
+func insertSymbolsTx(tx *sql.Tx, projectID string, symbols []*Symbol) error {
+	if len(symbols) == 0 {
+		return nil
+	}
 
 	stmt, err := tx.Prepare(`
 	INSERT INTO symbols (project_id, file, name, kind, signature, parent, language, start_line, end_line, start_byte, end_byte, relevance_score)
@@ -72,7 +93,7 @@ func (r *SymbolRepo) SaveSymbols(projectID string, symbols []*Symbol) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, s := range symbols {
 		_, err := stmt.Exec(
@@ -93,8 +114,7 @@ func (r *SymbolRepo) SaveSymbols(projectID string, symbols []*Symbol) error {
 			return fmt.Errorf("falha ao inserir símbolo %s: %w", s.Name, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // SaveReferences salva uma lista de chamadores/referências em lote utilizando transação.
@@ -107,7 +127,20 @@ func (r *SymbolRepo) SaveReferences(projectID string, refs []*CallerInfo) error 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
+
+	if err := insertReferencesTx(tx, projectID, refs); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertReferencesTx insere referências em lote dentro de uma transação existente.
+func insertReferencesTx(tx *sql.Tx, projectID string, refs []*CallerInfo) error {
+	if len(refs) == 0 {
+		return nil
+	}
 
 	stmt, err := tx.Prepare(`
 	INSERT OR IGNORE INTO references_table (project_id, file, line, text, symbol_name)
@@ -116,7 +149,7 @@ func (r *SymbolRepo) SaveReferences(projectID string, refs []*CallerInfo) error 
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, ref := range refs {
 		_, err := stmt.Exec(
@@ -130,8 +163,7 @@ func (r *SymbolRepo) SaveReferences(projectID string, refs []*CallerInfo) error 
 			return fmt.Errorf("falha ao inserir referência %s: %w", ref.SymbolName, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // FindSymbol busca símbolos por nome exato ou contenção parcial no projeto com suporte a ordenação por relevância e paginação.
@@ -162,7 +194,7 @@ func (r *SymbolRepo) FindSymbol(projectID, symbolName string, limit, offset int)
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []*Symbol
 	for rows.Next() {
@@ -260,7 +292,7 @@ func (r *SymbolRepo) FindReferences(projectID, symbolName string, limit, offset 
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var refs []*CallerInfo
 	for rows.Next() {
@@ -298,13 +330,13 @@ func (r *SymbolRepo) UpdateRelevanceScores(projectID string, symbolScores map[in
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`UPDATE symbols SET relevance_score = ? WHERE id = ? AND project_id = ?`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for id, score := range symbolScores {
 		if _, err := stmt.Exec(score, id, projectID); err != nil {
@@ -327,7 +359,7 @@ func (r *SymbolRepo) GetFileImportCounts(projectID string) (map[string]int, erro
 		GROUP BY target_file
 	`, projectID)
 	if err == nil {
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var file string
 			var count int
@@ -353,7 +385,7 @@ func (r *SymbolRepo) GetSymbolReferenceCounts(projectID string) (map[string]int,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var name string
@@ -377,7 +409,7 @@ func (r *SymbolRepo) GetAllSymbolsForRanking(projectID string) ([]*Symbol, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []*Symbol
 	for rows.Next() {
@@ -420,7 +452,7 @@ func (r *SymbolRepo) GetSymbolsByFileAndLineRange(projectID, file string, startL
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []*Symbol
 	for rows.Next() {
@@ -460,7 +492,7 @@ func (r *SymbolRepo) GetSymbolCountsByFile(projectID string) ([]*FileSymbolStats
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var stats []*FileSymbolStats
 	for rows.Next() {
@@ -497,7 +529,7 @@ func (r *SymbolRepo) GetSymbolCountsByFile(projectID string) ([]*FileSymbolStats
 		if err != nil {
 			return nil, err
 		}
-		defer legRows.Close()
+		defer func() { _ = legRows.Close() }()
 
 		for legRows.Next() {
 			var s FileSymbolStats

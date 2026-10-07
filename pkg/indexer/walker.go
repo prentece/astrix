@@ -2,6 +2,8 @@ package indexer
 
 import (
 	"astrix/pkg/storage"
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,10 +12,12 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
+// MaxIndexableFileSize define o tamanho máximo padrão (2MB) de arquivos de código a serem indexados.
+var MaxIndexableFileSize int64 = 2 * 1024 * 1024
+
 // DefaultIgnoredDirs são pastas comumente ignoradas em repositórios.
 var DefaultIgnoredDirs = map[string]bool{
 	".git":          true,
-	".github":       true,
 	".vscode":       true,
 	".idea":         true,
 	"node_modules":  true,
@@ -43,16 +47,91 @@ type FileInfo struct {
 	Config  LanguageConfig
 }
 
+// IsBinaryFile detecta se um arquivo é binário inspecionando os primeiros 512 bytes em busca de bytes NUL (0x00).
+func IsBinaryFile(absPath string) bool {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return false
+	}
+	return bytes.IndexByte(buf[:n], 0) != -1
+}
+
+// LoadGitIgnore carrega e compila regras de ignore a partir do .gitignore da raiz,
+// .git/info/exclude (se existir) e .gitignore aninhados em subdiretórios.
+func LoadGitIgnore(rootDir string) *ignore.GitIgnore {
+	var lines []string
+
+	// 1. .gitignore na raiz
+	rootGitignore := filepath.Join(rootDir, ".gitignore")
+	if data, err := os.ReadFile(rootGitignore); err == nil {
+		lines = append(lines, strings.Split(string(data), "\n")...)
+	}
+
+	// 2. .git/info/exclude
+	gitExclude := filepath.Join(rootDir, ".git", "info", "exclude")
+	if data, err := os.ReadFile(gitExclude); err == nil {
+		lines = append(lines, strings.Split(string(data), "\n")...)
+	}
+
+	// 3. Procura .gitignore aninhados em subpastas
+	_ = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if base == ".git" || DefaultIgnoredDirs[base] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.Name() == ".gitignore" && path != rootGitignore {
+			relDir, err := filepath.Rel(rootDir, filepath.Dir(path))
+			if err == nil && relDir != "." && relDir != "" {
+				if data, err := os.ReadFile(path); err == nil {
+					subLines := strings.Split(string(data), "\n")
+					for _, l := range subLines {
+						l = strings.TrimSpace(l)
+						if l == "" || strings.HasPrefix(l, "#") {
+							continue
+						}
+						negated := strings.HasPrefix(l, "!")
+						pattern := strings.TrimPrefix(l, "!")
+						prefix := filepath.ToSlash(relDir)
+						if !strings.HasPrefix(pattern, "/") {
+							pattern = prefix + "/" + pattern
+						} else {
+							pattern = prefix + pattern
+						}
+						if negated {
+							pattern = "!" + pattern
+						}
+						lines = append(lines, pattern)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	if len(lines) == 0 {
+		return nil
+	}
+	return ignore.CompileIgnoreLines(lines...)
+}
+
 // ScanRepository percorre o diretório do projeto respeitando .gitignore e pastas ignoradas.
 func ScanRepository(rootDir string) ([]FileInfo, error) {
 	var files []FileInfo
 
-	// Carrega .gitignore da raiz se existir
-	var gitIgnore *ignore.GitIgnore
-	gitignorePath := filepath.Join(rootDir, ".gitignore")
-	if data, err := os.ReadFile(gitignorePath); err == nil {
-		gitIgnore = ignore.CompileIgnoreLines(strings.Split(string(data), "\n")...)
-	}
+	gitIgnore := LoadGitIgnore(rootDir)
 
 	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -71,7 +150,7 @@ func ScanRepository(rootDir string) ([]FileInfo, error) {
 		// Verifica se é diretório ignorado por padrão
 		if info.IsDir() {
 			baseName := filepath.Base(path)
-			if DefaultIgnoredDirs[baseName] || strings.HasPrefix(baseName, ".") {
+			if DefaultIgnoredDirs[baseName] || baseName == ".git" {
 				return filepath.SkipDir
 			}
 			if gitIgnore != nil && gitIgnore.MatchesPath(relPath) {
@@ -85,8 +164,13 @@ func ScanRepository(rootDir string) ([]FileInfo, error) {
 			return nil
 		}
 
-		// Ignora arquivos muito grandes (> 2MB) ou binários
-		if info.Size() > 2*1024*1024 || info.Size() == 0 {
+		// Ignora arquivos muito grandes ou vazios
+		if info.Size() > MaxIndexableFileSize || info.Size() == 0 {
+			return nil
+		}
+
+		// Ignora arquivos binários inspecionando byte NUL
+		if IsBinaryFile(path) {
 			return nil
 		}
 
@@ -109,18 +193,16 @@ func ScanRepository(rootDir string) ([]FileInfo, error) {
 
 // BuildDirectoryTree gera a árvore estruturada de arquivos a partir de um subcaminho relativo.
 func BuildDirectoryTree(rootDir, subPath string, maxDepth int) (*storage.FileNode, error) {
-	targetAbs := filepath.Join(rootDir, subPath)
+	targetAbs, err := SafeJoin(rootDir, subPath)
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(targetAbs)
 	if err != nil {
 		return nil, err
 	}
 
-	// Carrega .gitignore se existir
-	var gitIgnore *ignore.GitIgnore
-	gitignorePath := filepath.Join(rootDir, ".gitignore")
-	if data, err := os.ReadFile(gitignorePath); err == nil {
-		gitIgnore = ignore.CompileIgnoreLines(strings.Split(string(data), "\n")...)
-	}
+	gitIgnore := LoadGitIgnore(rootDir)
 
 	relPath, _ := filepath.Rel(rootDir, targetAbs)
 	if relPath == "." {
@@ -210,7 +292,10 @@ func BuildTreeText(rootDir, subPath string, maxDepth int, showHidden bool) (stri
 		maxDepth = 2
 	}
 
-	targetAbs := filepath.Join(rootDir, subPath)
+	targetAbs, err := SafeJoin(rootDir, subPath)
+	if err != nil {
+		return "", err
+	}
 	info, err := os.Stat(targetAbs)
 	if err != nil {
 		return "", err
@@ -220,12 +305,7 @@ func BuildTreeText(rootDir, subPath string, maxDepth int, showHidden bool) (stri
 		return filepath.Base(targetAbs) + "\n", nil
 	}
 
-	// Carrega .gitignore se existir
-	var gitIgnore *ignore.GitIgnore
-	gitignorePath := filepath.Join(rootDir, ".gitignore")
-	if data, err := os.ReadFile(gitignorePath); err == nil {
-		gitIgnore = ignore.CompileIgnoreLines(strings.Split(string(data), "\n")...)
-	}
+	gitIgnore := LoadGitIgnore(rootDir)
 
 	var sb strings.Builder
 

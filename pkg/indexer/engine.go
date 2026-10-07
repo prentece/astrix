@@ -1,8 +1,8 @@
 package indexer
 
 import (
-	"bufio"
 	"astrix/pkg/storage"
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,14 +23,18 @@ import (
 
 // Engine coordena a análise sintática de código via Tree-sitter, busca textual e a persistência desacoplada de dados.
 type Engine struct {
-	projectRepo   storage.ProjectRepository
-	symbolRepo    storage.SymbolRepository
-	depRepo       storage.DependencyGraphRepository
-	dataModelRepo storage.DataModelRepository
-	fileStateRepo storage.FileStateRepository
-	indexingMu    sync.Mutex
-	indexingMap   map[string]bool
-	progressMap   map[string]*storage.IndexingProgress
+	projectRepo        storage.ProjectRepository
+	symbolRepo         storage.SymbolRepository
+	depRepo            storage.DependencyGraphRepository
+	dataModelRepo      storage.DataModelRepository
+	fileStateRepo      storage.FileStateRepository
+	indexReplacer      storage.IndexReplacer
+	incrementalApplier storage.IncrementalApplier
+	indexingMu         sync.Mutex
+	indexingMap        map[string]bool
+	progressMap        map[string]*storage.IndexingProgress
+	queryCacheMu       sync.RWMutex
+	queryCache         map[string]*sitter.Query
 }
 
 // NewEngine inicializa o motor de indexação e operações utilizando interfaces de repositório.
@@ -47,6 +51,7 @@ func NewEngine(
 		dataModelRepo: dataModelRepo,
 		indexingMap:   make(map[string]bool),
 		progressMap:   make(map[string]*storage.IndexingProgress),
+		queryCache:    make(map[string]*sitter.Query),
 	}
 }
 
@@ -55,8 +60,8 @@ func (e *Engine) GetIndexingProgress(projectID string) *storage.IndexingProgress
 	e.indexingMu.Lock()
 	defer e.indexingMu.Unlock()
 	if p, ok := e.progressMap[projectID]; ok && p != nil {
-		copy := *p
-		return &copy
+		cp := *p
+		return &cp
 	}
 	return nil
 }
@@ -66,44 +71,95 @@ func (e *Engine) SetFileStateRepo(repo storage.FileStateRepository) {
 	e.fileStateRepo = repo
 }
 
-// detectLanguageByExtension detecta a linguagem de programação com base na extensão do arquivo.
-func detectLanguageByExtension(filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	langMap := map[string]string{
-		".go":    "go",
-		".ts":    "typescript",
-		".tsx":   "typescript",
-		".js":    "javascript",
-		".jsx":   "javascript",
-		".py":    "python",
-		".java":  "java",
-		".kt":    "kotlin",
-		".rs":    "rust",
-		".rb":    "ruby",
-		".php":   "php",
-		".cs":    "csharp",
-		".cpp":   "cpp",
-		".c":     "c",
-		".h":     "c",
-		".hpp":   "cpp",
-		".swift": "swift",
-		".sql":   "sql",
-		".html":  "html",
-		".css":   "css",
-		".scss":  "scss",
-		".yaml":  "yaml",
-		".yml":   "yaml",
-		".json":  "json",
-		".xml":   "xml",
-		".md":    "markdown",
-		".sh":    "shell",
-		".bash":  "shell",
-		".lua":   "lua",
-		".dart":  "dart",
-		".ex":    "elixir",
-		".exs":   "elixir",
+// SetIndexReplacer injeta o gravador atômico de índice usado na reindexação completa.
+// Quando nil, a engine usa o caminho legado (não-atômico) baseado nos repositórios individuais.
+func (e *Engine) SetIndexReplacer(r storage.IndexReplacer) {
+	e.indexReplacer = r
+	if applier, ok := r.(storage.IncrementalApplier); ok {
+		e.incrementalApplier = applier
 	}
-	if lang, ok := langMap[ext]; ok {
+}
+
+// SetIncrementalApplier injeta o aplicador atômico de deltas incrementais.
+func (e *Engine) SetIncrementalApplier(a storage.IncrementalApplier) {
+	e.incrementalApplier = a
+}
+
+// Close libera recursos mantidos pela Engine, incluindo queries Tree-sitter em cache.
+func (e *Engine) Close() error {
+	e.queryCacheMu.Lock()
+	defer e.queryCacheMu.Unlock()
+	for _, q := range e.queryCache {
+		if q != nil {
+			q.Close()
+		}
+	}
+	e.queryCache = make(map[string]*sitter.Query)
+	return nil
+}
+
+// getOrCompileQuery recupera ou compila de forma thread-safe uma Query Tree-sitter imutável.
+func (e *Engine) getOrCompileQuery(lang *sitter.Language, langName, queryType, queryStr string) (*sitter.Query, error) {
+	if queryStr == "" || lang == nil {
+		return nil, nil
+	}
+	key := langName + ":" + queryType
+	e.queryCacheMu.RLock()
+	q, ok := e.queryCache[key]
+	e.queryCacheMu.RUnlock()
+	if ok {
+		return q, nil
+	}
+
+	e.queryCacheMu.Lock()
+	defer e.queryCacheMu.Unlock()
+	if q, ok := e.queryCache[key]; ok {
+		return q, nil
+	}
+
+	compiled, err := sitter.NewQuery([]byte(queryStr), lang)
+	if err != nil {
+		return nil, err
+	}
+	e.queryCache[key] = compiled
+	return compiled, nil
+}
+
+// supplementalExtLanguages mapeia extensões sem gramática Tree-sitter completa para nomes amigáveis.
+var supplementalExtLanguages = map[string]string{
+	".sql":   "sql",
+	".html":  "html",
+	".css":   "css",
+	".scss":  "scss",
+	".yaml":  "yaml",
+	".yml":   "yaml",
+	".json":  "json",
+	".xml":   "xml",
+	".md":    "markdown",
+	".sh":    "shell",
+	".bash":  "shell",
+	".lua":   "lua",
+	".dart":  "dart",
+	".ex":    "elixir",
+	".exs":   "elixir",
+	".kt":    "kotlin",
+	".rs":    "rust",
+	".rb":    "ruby",
+	".cs":    "csharp",
+	".cpp":   "cpp",
+	".c":     "c",
+	".h":     "c",
+	".hpp":   "cpp",
+	".swift": "swift",
+}
+
+// detectLanguageByExtension detecta a linguagem derivando prioritariamente do registry central de LanguageConfig.
+func detectLanguageByExtension(filePath string) string {
+	if cfg, ok := GetConfigByFilePath(filePath); ok {
+		return cfg.Name()
+	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if lang, ok := supplementalExtLanguages[ext]; ok {
 		return lang
 	}
 	if ext != "" {
@@ -189,18 +245,7 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 	}
 	e.indexingMu.Unlock()
 
-	// 2. Limpa dados de indexações anteriores deste projeto
-	if err := e.symbolRepo.ClearProjectData(proj.ID); err != nil {
-		errMsg := fmt.Sprintf("falha ao limpar índice antigo: %v", err)
-		_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, 0, 0)
-		return err
-	}
-	if e.depRepo != nil {
-		_ = e.depRepo.ClearProjectDependencies(proj.ID)
-	}
-	if e.dataModelRepo != nil {
-		_ = e.dataModelRepo.ClearProjectDataModels(proj.ID)
-	}
+	// 2. (Limpeza do índice antigo ocorre após o parse, antes de salvar — ver passo 4.)
 
 	var allSymbols []*storage.Symbol
 	var allRefs []*storage.CallerInfo
@@ -257,7 +302,7 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 					continue
 				}
 
-				symbols, refs, deps, modelsList, err := e.ExtractASTData(proj.ID, job.file.RelPath, content, job.file.Config)
+				parsed, err := e.ExtractASTDataAndDigest(proj.ID, job.file.RelPath, content, job.file.Config)
 				if err != nil {
 					log.Printf("[INDEXER WARN] Erro ao processar AST de %s: %v\n", job.file.RelPath, err)
 					resultCh <- indexResult{idx: job.idx, file: job.file, err: err}
@@ -274,8 +319,7 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 						fileSize = info.Size()
 					}
 					cHash := calculateHash(content)
-					digest := e.ExtractASTDigest(job.file.RelPath, content, job.file.Config)
-					dHash := calculateHash([]byte(digest))
+					dHash := calculateHash([]byte(parsed.Digest))
 					state = &storage.ProjectFileState{
 						ProjectID:   proj.ID,
 						FilePath:    job.file.RelPath,
@@ -289,10 +333,10 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 				resultCh <- indexResult{
 					idx:        job.idx,
 					file:       job.file,
-					symbols:    symbols,
-					refs:       refs,
-					deps:       deps,
-					modelsList: modelsList,
+					symbols:    parsed.Symbols,
+					refs:       parsed.Callers,
+					deps:       parsed.Dependencies,
+					modelsList: parsed.DataModels,
 					fileState:  state,
 				}
 			}
@@ -334,38 +378,69 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 		e.indexingMu.Unlock()
 	}
 
-	// 4. Salva os símbolos, referências, dependências e modelos no SQLite
-	if err := e.symbolRepo.SaveSymbols(proj.ID, allSymbols); err != nil {
-		errMsg := fmt.Sprintf("falha ao salvar símbolos: %v", err)
-		_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, len(files), 0)
-		return err
-	}
-
-	if err := e.symbolRepo.SaveReferences(proj.ID, allRefs); err != nil {
-		log.Printf("[INDEXER WARN] Falha ao salvar referências: %v\n", err)
-	}
-
-	if e.depRepo != nil && len(allDeps) > 0 {
-		if err := e.depRepo.SaveDependencies(proj.ID, allDeps); err != nil {
-			log.Printf("[INDEXER WARN] Falha ao salvar dependências: %v\n", err)
+	// 3.1/4. Persiste o novo índice. Com IndexReplacer, limpeza + gravação de símbolos, referências,
+	// dependências, modelos e estados de arquivo ocorrem em UMA transação: se algo falhar, o índice
+	// anterior permanece intacto.
+	statesPersisted := false
+	if e.indexReplacer != nil {
+		snap := &storage.IndexSnapshot{
+			ProjectID:         proj.ID,
+			Symbols:           allSymbols,
+			References:        allRefs,
+			Dependencies:      allDeps,
+			DataModels:        allModels,
+			FileStates:        allFileStates,
+			ReplaceFileStates: e.fileStateRepo != nil,
 		}
-	}
-
-	if e.dataModelRepo != nil && len(allModels) > 0 {
-		if err := e.dataModelRepo.SaveDataModels(proj.ID, allModels); err != nil {
-			log.Printf("[INDEXER WARN] Falha ao salvar modelos de dados: %v\n", err)
+		if err := e.indexReplacer.ReplaceProjectIndex(snap); err != nil {
+			errMsg := fmt.Sprintf("falha ao salvar índice: %v", err)
+			_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, len(files), 0)
+			return err
 		}
-	}
+		statesPersisted = true
+	} else {
+		// Fallback não-atômico (repositórios sem suporte a transação compartilhada).
+		// Limpa dados de indexações anteriores somente após o parse concluir.
+		if err := e.symbolRepo.ClearProjectData(proj.ID); err != nil {
+			errMsg := fmt.Sprintf("falha ao limpar índice antigo: %v", err)
+			_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, 0, 0)
+			return err
+		}
+		if e.depRepo != nil {
+			_ = e.depRepo.ClearProjectDependencies(proj.ID)
+		}
+		if e.dataModelRepo != nil {
+			_ = e.dataModelRepo.ClearProjectDataModels(proj.ID)
+		}
 
-	// 5. Resolução e enriquecimento de target_file para as dependências
-	if e.depRepo != nil && len(allSymbols) > 0 {
-		symMap := make(map[string]string)
-		for _, s := range allSymbols {
-			if s.Name != "" && s.File != "" {
-				symMap[s.Name] = s.File
+		if err := e.symbolRepo.SaveSymbols(proj.ID, allSymbols); err != nil {
+			errMsg := fmt.Sprintf("falha ao salvar símbolos: %v", err)
+			_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, errMsg, len(files), 0)
+			return err
+		}
+
+		if err := e.symbolRepo.SaveReferences(proj.ID, allRefs); err != nil {
+			log.Printf("[INDEXER WARN] Falha ao salvar referências: %v\n", err)
+		}
+
+		if e.depRepo != nil && len(allDeps) > 0 {
+			if err := e.depRepo.SaveDependencies(proj.ID, allDeps); err != nil {
+				log.Printf("[INDEXER WARN] Falha ao salvar dependências: %v\n", err)
 			}
 		}
-		_ = e.depRepo.UpdateTargetFiles(proj.ID, symMap)
+
+		if e.dataModelRepo != nil && len(allModels) > 0 {
+			if err := e.dataModelRepo.SaveDataModels(proj.ID, allModels); err != nil {
+				log.Printf("[INDEXER WARN] Falha ao salvar modelos de dados: %v\n", err)
+			}
+		}
+	}
+
+	// 5. Resolução e enriquecimento de target_file para as dependências (com desambiguação de homônimos)
+	if e.depRepo != nil && len(allSymbols) > 0 {
+		if err := e.depRepo.ResolveTargetFiles(proj.ID, allSymbols); err != nil {
+			log.Printf("[INDEXER WARN] Falha ao resolver target_file das dependências: %v\n", err)
+		}
 	}
 
 	// 5.1. Cálculo de Centralidade e Relevância dos Símbolos (PageRank de Código)
@@ -374,7 +449,7 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 	}
 
 	// 5.2. Persistência de baseline dos estados de arquivos (Two-Tier Hash em lote)
-	if e.fileStateRepo != nil && len(allFileStates) > 0 {
+	if !statesPersisted && e.fileStateRepo != nil && len(allFileStates) > 0 {
 		_ = e.fileStateRepo.DeleteByProject(proj.ID)
 		if err := e.fileStateRepo.UpsertBatch(allFileStates); err != nil {
 			log.Printf("[INDEXER WARN] Falha ao salvar estados de arquivos em lote: %v\n", err)
@@ -469,46 +544,172 @@ func (e *Engine) ProcessIncrementalDelta(projectID string) (*storage.DeltaReport
 		Strategy:  delta.Strategy,
 	}
 
-	// 1. Processar Arquivos Deletados (Remoções em Cascata)
-	for _, delFile := range delta.DeletedFiles {
-		_ = e.symbolRepo.DeleteByFile(proj.ID, delFile)
-		if e.depRepo != nil {
-			_ = e.depRepo.DeleteByFile(proj.ID, delFile)
-		}
-		if e.dataModelRepo != nil {
-			_ = e.dataModelRepo.DeleteByFile(proj.ID, delFile)
-		}
-		_ = e.fileStateRepo.Delete(proj.ID, delFile)
-		report.FilesDeleted++
+	// 1. Processar Arquivos Deletados
+	report.FilesDeleted = len(delta.DeletedFiles)
+
+	// 2. Processar Arquivos Modificados e Adicionados concorrentemente (Worker Pool)
+	type incJob struct {
+		idx     int
+		relPath string
+		isAdded bool
 	}
 
-	// 2. Processar Arquivos Modificados e Adicionados (Two-Tier Evaluation)
-	targetFiles := append(delta.AddedFiles, delta.ModifiedFiles...)
-	var modifiedSymbols []*storage.Symbol
-	var modifiedRefs []*storage.CallerInfo
-	var modifiedDeps []*storage.DependencyEdge
-	var modifiedModels []*storage.DataModel
+	type incResult struct {
+		idx           int
+		relPath       string
+		skipped       bool
+		digestChanged bool
+		symbols       []*storage.Symbol
+		refs          []*storage.CallerInfo
+		deps          []*storage.DependencyEdge
+		models        []*storage.DataModel
+		state         *storage.ProjectFileState
+		err           error
+	}
+
+	totalCandidateCount := len(delta.AddedFiles) + len(delta.ModifiedFiles)
+	jobs := make([]incJob, 0, totalCandidateCount)
+	for i, f := range delta.AddedFiles {
+		jobs = append(jobs, incJob{idx: i, relPath: f, isAdded: true})
+	}
+	for i, f := range delta.ModifiedFiles {
+		jobs = append(jobs, incJob{idx: len(delta.AddedFiles) + i, relPath: f, isAdded: false})
+	}
 
 	e.indexingMu.Lock()
 	e.progressMap[proj.ID] = &storage.IndexingProgress{
 		ProjectID:      proj.ID,
 		IsIndexing:     true,
 		ProcessedFiles: 0,
-		TotalFiles:     len(targetFiles),
+		TotalFiles:     totalCandidateCount,
 		Percent:        0,
 	}
 	e.indexingMu.Unlock()
 
-	for idx, relPath := range targetFiles {
-		absPath := filepath.Join(proj.Path, relPath)
-		content, err := os.ReadFile(absPath)
-		if err != nil {
-			continue
-		}
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > totalCandidateCount {
+		numWorkers = totalCandidateCount
+	}
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
 
+	jobCh := make(chan incJob, totalCandidateCount)
+	resultCh := make(chan incResult, numWorkers*2)
+
+	for _, j := range jobs {
+		jobCh <- j
+	}
+	close(jobCh)
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				absPath, err := SafeJoin(proj.Path, job.relPath)
+				if err != nil {
+					resultCh <- incResult{idx: job.idx, relPath: job.relPath, err: err}
+					continue
+				}
+
+				content, err := os.ReadFile(absPath)
+				if err != nil {
+					resultCh <- incResult{idx: job.idx, relPath: job.relPath, err: err}
+					continue
+				}
+
+				info, _ := os.Stat(absPath)
+				mtime := int64(0)
+				fileSize := int64(len(content))
+				if info != nil {
+					mtime = info.ModTime().Unix()
+					fileSize = info.Size()
+				}
+
+				config, ok := GetConfigByFilePath(job.relPath)
+				if !ok {
+					// Arquivo sem parser cadastrado
+					resultCh <- incResult{idx: job.idx, relPath: job.relPath, skipped: true}
+					continue
+				}
+
+				contentHash := calculateHash(content)
+				oldState := cachedStates[job.relPath]
+
+				// Nível 1: content_hash check (sem alteração de conteúdo)
+				if !job.isAdded && oldState != nil && oldState.ContentHash == contentHash {
+					resultCh <- incResult{
+						idx:     job.idx,
+						relPath: job.relPath,
+						skipped: true,
+						state: &storage.ProjectFileState{
+							ProjectID:     proj.ID,
+							FilePath:      job.relPath,
+							MTime:         mtime,
+							FileSize:      fileSize,
+							ContentHash:   contentHash,
+							DigestHash:    oldState.DigestHash,
+							LastIndexedAt: time.Now(),
+						},
+					}
+					continue
+				}
+
+				// Conteúdo alterado ou novo: parse via AST e digest com query cache unificado
+				parsed, err := e.ExtractASTDataAndDigest(proj.ID, job.relPath, content, config)
+				if err != nil {
+					resultCh <- incResult{idx: job.idx, relPath: job.relPath, err: err}
+					continue
+				}
+
+				digestHash := calculateHash([]byte(parsed.Digest))
+				digestChanged := job.isAdded || oldState == nil || oldState.DigestHash != digestHash
+
+				resultCh <- incResult{
+					idx:           job.idx,
+					relPath:       job.relPath,
+					skipped:       false,
+					digestChanged: digestChanged,
+					symbols:       parsed.Symbols,
+					refs:          parsed.Callers,
+					deps:          parsed.Dependencies,
+					models:        parsed.DataModels,
+					state: &storage.ProjectFileState{
+						ProjectID:     proj.ID,
+						FilePath:      job.relPath,
+						MTime:         mtime,
+						FileSize:      fileSize,
+						ContentHash:   contentHash,
+						DigestHash:    digestHash,
+						LastIndexedAt: time.Now(),
+					},
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	var modifiedSymbols []*storage.Symbol
+	var modifiedRefs []*storage.CallerInfo
+	var modifiedDeps []*storage.DependencyEdge
+	var modifiedModels []*storage.DataModel
+	var allStatesToPersist []*storage.ProjectFileState
+	var parsedFiles []string
+
+	structuralChanged := len(delta.AddedFiles) > 0 || len(delta.DeletedFiles) > 0
+	completedCount := 0
+
+	for res := range resultCh {
+		completedCount++
 		pct := 0
-		if len(targetFiles) > 0 {
-			pct = ((idx + 1) * 100) / len(targetFiles)
+		if totalCandidateCount > 0 {
+			pct = (completedCount * 100) / totalCandidateCount
 			if pct > 100 {
 				pct = 100
 			}
@@ -516,108 +717,122 @@ func (e *Engine) ProcessIncrementalDelta(projectID string) (*storage.DeltaReport
 
 		e.indexingMu.Lock()
 		if prog := e.progressMap[proj.ID]; prog != nil {
-			prog.ProcessedFiles = idx + 1
-			prog.CurrentFile = relPath
+			prog.ProcessedFiles = completedCount
+			prog.CurrentFile = res.relPath
 			prog.Percent = pct
 		}
 		e.indexingMu.Unlock()
 
-		info, _ := os.Stat(absPath)
-		mtime := int64(0)
-		fileSize := int64(len(content))
-		if info != nil {
-			mtime = info.ModTime().Unix()
-			fileSize = info.Size()
-		}
-
-		config, ok := GetConfigByFilePath(relPath)
-		if !ok {
+		if res.err != nil {
+			log.Printf("[DELTA INDEXER WARN] Falha ao processar arquivo %s: %v\n", res.relPath, res.err)
 			continue
 		}
 
-		contentHash := calculateHash(content)
-		oldState := cachedStates[relPath]
+		if res.state != nil {
+			allStatesToPersist = append(allStatesToPersist, res.state)
+		}
 
-		// Nível 1: content_hash check (AST evaluation)
-		if oldState != nil && oldState.ContentHash == contentHash {
+		if res.skipped {
 			report.FilesSkipped++
-			_ = e.fileStateRepo.Upsert(&storage.ProjectFileState{
-				ProjectID:     proj.ID,
-				FilePath:      relPath,
-				MTime:         mtime,
-				FileSize:      fileSize,
-				ContentHash:   contentHash,
-				DigestHash:    oldState.DigestHash,
-				LastIndexedAt: time.Now(),
-			})
 			continue
 		}
 
-		// O conteúdo mudou: reparseia AST deste arquivo
-		_ = e.symbolRepo.DeleteByFile(proj.ID, relPath)
-		if e.depRepo != nil {
-			_ = e.depRepo.DeleteByFile(proj.ID, relPath)
-		}
-		if e.dataModelRepo != nil {
-			_ = e.dataModelRepo.DeleteByFile(proj.ID, relPath)
-		}
-
-		syms, refs, deps, modelsList, err := e.ExtractASTData(proj.ID, relPath, content, config)
-		if err == nil {
-			modifiedSymbols = append(modifiedSymbols, syms...)
-			modifiedRefs = append(modifiedRefs, refs...)
-			modifiedDeps = append(modifiedDeps, deps...)
-			modifiedModels = append(modifiedModels, modelsList...)
-		}
 		report.FilesParsed++
+		parsedFiles = append(parsedFiles, res.relPath)
+		modifiedSymbols = append(modifiedSymbols, res.symbols...)
+		modifiedRefs = append(modifiedRefs, res.refs...)
+		modifiedDeps = append(modifiedDeps, res.deps...)
+		modifiedModels = append(modifiedModels, res.models...)
 
-		// Nível 2: digest_hash check
-		digest := e.ExtractASTDigest(relPath, content, config)
-		digestHash := calculateHash([]byte(digest))
+		if res.digestChanged {
+			structuralChanged = true
+		}
+	}
 
-		// Atualiza estado no banco
-		_ = e.fileStateRepo.Upsert(&storage.ProjectFileState{
+	// 3. Persistência atômica do delta
+	if e.incrementalApplier != nil {
+		incDelta := &storage.IncrementalIndexDelta{
 			ProjectID:     proj.ID,
-			FilePath:      relPath,
-			MTime:         mtime,
-			FileSize:      fileSize,
-			ContentHash:   contentHash,
-			DigestHash:    digestHash,
-			LastIndexedAt: time.Now(),
-		})
+			DeletedFiles:  delta.DeletedFiles,
+			ModifiedFiles: parsedFiles,
+			Symbols:       modifiedSymbols,
+			References:    modifiedRefs,
+			Dependencies:  modifiedDeps,
+			DataModels:    modifiedModels,
+			FileStates:    allStatesToPersist,
+		}
+		if err := e.incrementalApplier.ApplyIncrementalDelta(incDelta); err != nil {
+			_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusError, err.Error(), proj.FileCount, proj.SymbolCount)
+			return nil, fmt.Errorf("erro ao aplicar delta incremental atomicamente: %w", err)
+		}
+	} else {
+		// Caminho legado não-atômico com tratamento de erros
+		for _, delFile := range delta.DeletedFiles {
+			_ = e.symbolRepo.DeleteByFile(proj.ID, delFile)
+			if e.depRepo != nil {
+				_ = e.depRepo.DeleteByFile(proj.ID, delFile)
+			}
+			if e.dataModelRepo != nil {
+				_ = e.dataModelRepo.DeleteByFile(proj.ID, delFile)
+			}
+			_ = e.fileStateRepo.Delete(proj.ID, delFile)
+		}
+		for _, modFile := range parsedFiles {
+			_ = e.symbolRepo.DeleteByFile(proj.ID, modFile)
+			if e.depRepo != nil {
+				_ = e.depRepo.DeleteByFile(proj.ID, modFile)
+			}
+			if e.dataModelRepo != nil {
+				_ = e.dataModelRepo.DeleteByFile(proj.ID, modFile)
+			}
+		}
+		if len(modifiedSymbols) > 0 {
+			if err := e.symbolRepo.SaveSymbols(proj.ID, modifiedSymbols); err != nil {
+				log.Printf("[DELTA INDEXER WARN] Falha ao salvar símbolos: %v\n", err)
+			}
+		}
+		if len(modifiedRefs) > 0 {
+			if err := e.symbolRepo.SaveReferences(proj.ID, modifiedRefs); err != nil {
+				log.Printf("[DELTA INDEXER WARN] Falha ao salvar referências: %v\n", err)
+			}
+		}
+		if e.depRepo != nil && len(modifiedDeps) > 0 {
+			if err := e.depRepo.SaveDependencies(proj.ID, modifiedDeps); err != nil {
+				log.Printf("[DELTA INDEXER WARN] Falha ao salvar dependências: %v\n", err)
+			}
+		}
+		if e.dataModelRepo != nil && len(modifiedModels) > 0 {
+			if err := e.dataModelRepo.SaveDataModels(proj.ID, modifiedModels); err != nil {
+				log.Printf("[DELTA INDEXER WARN] Falha ao salvar modelos: %v\n", err)
+			}
+		}
+		if len(allStatesToPersist) > 0 {
+			if err := e.fileStateRepo.UpsertBatch(allStatesToPersist); err != nil {
+				log.Printf("[DELTA INDEXER WARN] Falha ao atualizar estados de arquivos: %v\n", err)
+			}
+		}
 	}
 
-	// 3. Salva novos símbolos, dependências e modelos
-	if len(modifiedSymbols) > 0 {
-		_ = e.symbolRepo.SaveSymbols(proj.ID, modifiedSymbols)
-	}
-	if len(modifiedRefs) > 0 {
-		_ = e.symbolRepo.SaveReferences(proj.ID, modifiedRefs)
-	}
-	if e.depRepo != nil && len(modifiedDeps) > 0 {
-		_ = e.depRepo.SaveDependencies(proj.ID, modifiedDeps)
-	}
-	if e.dataModelRepo != nil && len(modifiedModels) > 0 {
-		_ = e.dataModelRepo.SaveDataModels(proj.ID, modifiedModels)
-	}
-
-	// 4. Se houve alterações de símbolos, recalcula Centralidade e dependências
-	if report.FilesParsed > 0 || report.FilesDeleted > 0 {
+	// 4. Se houve alteração estrutural no projeto (adições, remoções ou digest_hash modificado),
+	// recalcula dependências e Centralidade (PageRank). Caso contrário, pula para máxima performance!
+	if structuralChanged {
 		allSymbols, _ := e.symbolRepo.GetAllSymbolsForRanking(proj.ID)
 		if e.depRepo != nil && len(allSymbols) > 0 {
-			symMap := make(map[string]string)
-			for _, s := range allSymbols {
-				if s.Name != "" && s.File != "" {
-					symMap[s.Name] = s.File
-				}
-			}
-			_ = e.depRepo.UpdateTargetFiles(proj.ID, symMap)
+			_ = e.depRepo.ResolveTargetFiles(proj.ID, allSymbols)
 		}
 		_ = CalculateProjectCentrality(proj.ID, e.symbolRepo)
 
-		// Atualizar contagens em projects
 		currentStates, _ := e.fileStateRepo.ListByProject(proj.ID)
 		totalFiles := len(currentStates)
+		totalSymbols := len(allSymbols)
+		_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusReady, "", totalFiles, totalSymbols)
+		report.TotalFiles = totalFiles
+		report.TotalSymbols = totalSymbols
+	} else if report.FilesParsed > 0 {
+		log.Printf("[DELTA INDEXER] Assinaturas/digest inalterados (%d arquivos modificados internamente). Recálculo de centralidade pulado com sucesso.\n", report.FilesParsed)
+		currentStates, _ := e.fileStateRepo.ListByProject(proj.ID)
+		totalFiles := len(currentStates)
+		allSymbols, _ := e.symbolRepo.GetAllSymbolsForRanking(proj.ID)
 		totalSymbols := len(allSymbols)
 		_ = e.projectRepo.UpdateStatus(proj.ID, storage.StatusReady, "", totalFiles, totalSymbols)
 		report.TotalFiles = totalFiles
@@ -629,8 +844,8 @@ func (e *Engine) ProcessIncrementalDelta(projectID string) (*storage.DeltaReport
 	}
 
 	report.DurationMs = time.Since(startTime).Milliseconds()
-	report.Message = fmt.Sprintf("Delta sincronizado via %s em %dms: %d parseados, %d ignorados, %d deletados, %d LLM hits",
-		report.Strategy, report.DurationMs, report.FilesParsed, report.FilesSkipped, report.FilesDeleted, report.LLMCacheHits)
+	report.Message = fmt.Sprintf("Delta sincronizado via %s em %dms: %d parseados, %d ignorados, %d deletados",
+		report.Strategy, report.DurationMs, report.FilesParsed, report.FilesSkipped, report.FilesDeleted)
 
 	log.Printf("[DELTA INDEXER SUCCESS] %s\n", report.Message)
 	return report, nil
@@ -647,21 +862,22 @@ func (e *Engine) ExtractSymbolsAndCallers(
 	return syms, refs, err
 }
 
+// ASTParseResult agrega todos os dados extraídos de um arquivo em uma única passada de AST.
+type ASTParseResult struct {
+	Symbols      []*storage.Symbol
+	Callers      []*storage.CallerInfo
+	Dependencies []*storage.DependencyEdge
+	DataModels   []*storage.DataModel
+	Digest       string
+}
+
 // ExtractASTDigest extrai o resumo estrutural/assinaturas de um arquivo via Tree-sitter.
 func (e *Engine) ExtractASTDigest(relPath string, content []byte, config LanguageConfig) string {
-	if digestExtractor, ok := config.(ASTDigestExtractor); ok {
-		lang := config.GetLanguage()
-		parser := sitter.NewParser()
-		parser.SetLanguage(lang)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		tree, err := parser.ParseCtx(ctx, nil, content)
-		if err == nil && tree != nil && tree.RootNode() != nil {
-			return digestExtractor.ExtractDigest(relPath, content, tree.RootNode())
-		}
+	res, err := e.ExtractASTDataAndDigest("", relPath, content, config)
+	if err != nil || res == nil {
+		return ""
 	}
-	return ""
+	return res.Digest
 }
 
 // ExtractASTData realiza a extração de símbolos, chamadas, dependências e modelos via Tree-sitter.
@@ -671,142 +887,174 @@ func (e *Engine) ExtractASTData(
 	content []byte,
 	config LanguageConfig,
 ) ([]*storage.Symbol, []*storage.CallerInfo, []*storage.DependencyEdge, []*storage.DataModel, error) {
+	res, err := e.ExtractASTDataAndDigest(projectID, relPath, content, config)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return res.Symbols, res.Callers, res.Dependencies, res.DataModels, nil
+}
+
+// ExtractASTDataAndDigest realiza a extração completa (símbolos, referências, dependências, modelos e digest)
+// em uma única passada pela AST, aproveitando o cache de queries Tree-sitter compiladas.
+func (e *Engine) ExtractASTDataAndDigest(
+	projectID string,
+	relPath string,
+	content []byte,
+	config LanguageConfig,
+) (*ASTParseResult, error) {
+	if config == nil {
+		return nil, fmt.Errorf("configuração de linguagem nula para %s", relPath)
+	}
+
 	lang := config.GetLanguage()
+	if lang == nil {
+		return nil, fmt.Errorf("gramática Tree-sitter indisponível para %s", config.Name())
+	}
+
 	parser := sitter.NewParser()
 	parser.SetLanguage(lang)
+	defer parser.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	tree, err := parser.ParseCtx(ctx, nil, content)
 	if err != nil || tree == nil {
-		return nil, nil, nil, nil, fmt.Errorf("falha ao analisar arquivo via Tree-sitter: %w", err)
+		return nil, fmt.Errorf("falha ao analisar arquivo via Tree-sitter: %w", err)
 	}
 	defer tree.Close()
 
 	rootNode := tree.RootNode()
-
-	// --- 1. Extração de Símbolos ---
-	symbolsQuery, err := sitter.NewQuery([]byte(config.SymbolsQuery()), lang)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("falha ao compilar SymbolsQuery: %w", err)
+	if rootNode == nil {
+		return nil, fmt.Errorf("rootNode nulo para %s", relPath)
 	}
 
-	defer symbolsQuery.Close()
+	if rootNode.HasError() {
+		log.Printf("[TREE-SITTER WARN] Arquivo '%s' contém erros de sintaxe; prosseguindo com recuperação parcial da árvore\n", relPath)
+	}
 
-	cursor := sitter.NewQueryCursor()
-	defer cursor.Close()
-	cursor.Exec(symbolsQuery, rootNode)
+	result := &ASTParseResult{}
 
-	var symbols []*storage.Symbol
+	// --- 1. Extração de Símbolos ---
+	symbolsQuery, err := e.getOrCompileQuery(lang, config.Name(), "symbols", config.SymbolsQuery())
+	if err != nil {
+		return nil, fmt.Errorf("falha ao compilar SymbolsQuery: %w", err)
+	}
 
-	for {
-		match, ok := cursor.NextMatch()
-		if !ok || match == nil {
-			break
-		}
+	if symbolsQuery != nil {
+		cursor := sitter.NewQueryCursor()
+		defer cursor.Close()
+		cursor.Exec(symbolsQuery, rootNode)
 
-		var name string
-		var kind storage.SymbolKind
-		var defNode *sitter.Node
+		var symbols []*storage.Symbol
 
-		for _, cap := range match.Captures {
-			capName := symbolsQuery.CaptureNameForId(cap.Index)
-			nodeText := cap.Node.Content(content)
+		for {
+			match, ok := cursor.NextMatch()
+			if !ok || match == nil {
+				break
+			}
 
-			switch capName {
-			case "function.name":
-				name = nodeText
-				kind = storage.KindFunction
-			case "function.def":
-				defNode = cap.Node
-			case "method.name":
-				name = nodeText
-				kind = storage.KindMethod
-			case "method.def":
-				defNode = cap.Node
-			case "struct.name":
-				name = nodeText
-				kind = storage.KindStruct
-			case "struct.def":
-				defNode = cap.Node
-			case "interface.name":
-				name = nodeText
-				kind = storage.KindInterface
-			case "interface.def":
-				defNode = cap.Node
-			case "class.name":
-				name = nodeText
-				kind = storage.KindClass
-			case "class.def":
-				defNode = cap.Node
-			case "type.name":
-				name = nodeText
-				kind = storage.KindType
-			case "type.def":
-				defNode = cap.Node
-			case "const.name":
-				name = nodeText
-				kind = storage.KindConstant
-			case "const.def":
-				defNode = cap.Node
-			case "var.name", "variable.name":
-				name = nodeText
-				kind = storage.KindVariable
-			case "var.def", "variable.def":
-				defNode = cap.Node
-			case "enum.name":
-				name = nodeText
-				kind = storage.KindEnum
-			case "enum.def":
-				defNode = cap.Node
-			case "import.name":
-				name = nodeText
-				kind = storage.KindImport
-			case "import.def":
-				defNode = cap.Node
+			var name string
+			var kind storage.SymbolKind
+			var defNode *sitter.Node
+
+			for _, cap := range match.Captures {
+				capName := symbolsQuery.CaptureNameForId(cap.Index)
+				nodeText := cap.Node.Content(content)
+
+				switch capName {
+				case "function.name":
+					name = nodeText
+					kind = storage.KindFunction
+				case "function.def":
+					defNode = cap.Node
+				case "method.name":
+					name = nodeText
+					kind = storage.KindMethod
+				case "method.def":
+					defNode = cap.Node
+				case "struct.name":
+					name = nodeText
+					kind = storage.KindStruct
+				case "struct.def":
+					defNode = cap.Node
+				case "interface.name":
+					name = nodeText
+					kind = storage.KindInterface
+				case "interface.def":
+					defNode = cap.Node
+				case "class.name":
+					name = nodeText
+					kind = storage.KindClass
+				case "class.def":
+					defNode = cap.Node
+				case "type.name":
+					name = nodeText
+					kind = storage.KindType
+				case "type.def":
+					defNode = cap.Node
+				case "const.name":
+					name = nodeText
+					kind = storage.KindConstant
+				case "const.def":
+					defNode = cap.Node
+				case "var.name", "variable.name":
+					name = nodeText
+					kind = storage.KindVariable
+				case "var.def", "variable.def":
+					defNode = cap.Node
+				case "enum.name":
+					name = nodeText
+					kind = storage.KindEnum
+				case "enum.def":
+					defNode = cap.Node
+				case "import.name":
+					name = nodeText
+					kind = storage.KindImport
+				case "import.def":
+					defNode = cap.Node
+				}
+			}
+
+			if name != "" && kind != "" && defNode != nil {
+				startPos := defNode.StartPoint()
+				endPos := defNode.EndPoint()
+
+				// Extrai a primeira linha como assinatura
+				nodeText := defNode.Content(content)
+				signature := strings.TrimSpace(strings.Split(nodeText, "\n")[0])
+
+				symbols = append(symbols, &storage.Symbol{
+					ProjectID: projectID,
+					File:      relPath,
+					Name:      name,
+					Kind:      kind,
+					Signature: signature,
+					Language:  config.Name(),
+					StartLine: int(startPos.Row) + 1, // 1-indexed
+					EndLine:   int(endPos.Row) + 1,   // 1-indexed
+					StartByte: int(defNode.StartByte()),
+					EndByte:   int(defNode.EndByte()),
+				})
 			}
 		}
 
-		if name != "" && kind != "" && defNode != nil {
-			startPos := defNode.StartPoint()
-			endPos := defNode.EndPoint()
+		// Deduplica símbolos pelo par (file, name), priorizando o bloco mais completo
+		symbols = deduplicateSymbols(symbols)
 
-			// Extrai a primeira linha como assinatura
-			nodeText := defNode.Content(content)
-			signature := strings.TrimSpace(strings.Split(nodeText, "\n")[0])
-
-			symbols = append(symbols, &storage.Symbol{
-				ProjectID: projectID,
-				File:      relPath,
-				Name:      name,
-				Kind:      kind,
-				Signature: signature,
-				Language:  config.Name(),
-				StartLine: int(startPos.Row) + 1, // 1-indexed
-				EndLine:   int(endPos.Row) + 1,   // 1-indexed
-				StartByte: int(defNode.StartByte()),
-				EndByte:   int(defNode.EndByte()),
-			})
+		// Ajusta métodos de Python que pertencem a classes
+		if config.Name() == "python" {
+			linkPythonClassMethods(symbols)
 		}
-	}
 
-	// Deduplica símbolos pelo par (file, name), priorizando o bloco mais completo
-	symbols = deduplicateSymbols(symbols)
-
-	// Ajusta métodos de Python que pertencem a classes
-	if config.Name() == "python" {
-		linkPythonClassMethods(symbols)
+		result.Symbols = symbols
 	}
 
 	// --- 2. Extração de Referências/Callers ---
-	var callers []*storage.CallerInfo
 	callersQueryStr := config.CallersQuery()
 	if callersQueryStr != "" {
-		callersQuery, err := sitter.NewQuery([]byte(callersQueryStr), lang)
-		if err == nil {
-			defer callersQuery.Close()
-
+		callersQuery, err := e.getOrCompileQuery(lang, config.Name(), "callers", callersQueryStr)
+		if err == nil && callersQuery != nil {
 			callCursor := sitter.NewQueryCursor()
 			defer callCursor.Close()
 			callCursor.Exec(callersQuery, rootNode)
@@ -814,6 +1062,7 @@ func (e *Engine) ExtractASTData(
 			contentStr := string(content)
 			contentLines := strings.Split(contentStr, "\n")
 
+			var callers []*storage.CallerInfo
 			for {
 				match, ok := callCursor.NextMatch()
 				if !ok || match == nil {
@@ -842,30 +1091,32 @@ func (e *Engine) ExtractASTData(
 					}
 				}
 			}
+			result.Callers = callers
 		}
 	}
 
 	// --- 2b. Extração de Import-Sites (type references de classes/structs/interfaces) ---
-	// Captura referências que não são call-sites: import statements, declarações de tipo,
-	// type annotations, herança e implementação. Implementado opcionalmente por linguagem.
 	if importer, ok := config.(ImportSiteExtractor); ok {
 		importSites := importer.ExtractImportSites(projectID, relPath, content, rootNode)
-		callers = append(callers, importSites...)
+		result.Callers = append(result.Callers, importSites...)
 	}
 
 	// --- 3. Extração de Dependências e Injeção (DI) ---
-	var dependencies []*storage.DependencyEdge
 	if extractor, ok := config.(DependencyExtractor); ok {
-		dependencies = extractor.ExtractDependencies(projectID, relPath, content, rootNode)
+		result.Dependencies = extractor.ExtractDependencies(projectID, relPath, content, rootNode)
 	}
 
 	// --- 4. Extração de Modelos de Dados e Schemas ---
-	var dataModels []*storage.DataModel
 	if extractor, ok := config.(DataModelExtractor); ok {
-		dataModels = extractor.ExtractDataModels(projectID, relPath, content, rootNode)
+		result.DataModels = extractor.ExtractDataModels(projectID, relPath, content, rootNode)
 	}
 
-	return symbols, callers, dependencies, dataModels, nil
+	// --- 5. Extração de Resumo Estrutural (AST Digest) sem segundo parse ---
+	if digestExtractor, ok := config.(ASTDigestExtractor); ok {
+		result.Digest = digestExtractor.ExtractDigest(relPath, content, rootNode)
+	}
+
+	return result, nil
 }
 
 // deduplicateSymbols remove duplicatas no mesmo arquivo mantendo a definição mais ampla.
@@ -943,7 +1194,10 @@ func (e *Engine) GetImplementation(project *storage.Project, filePath, symbolNam
 		return "", err
 	}
 
-	absPath := filepath.Join(project.Path, filePath)
+	absPath, err := SafeJoin(project.Path, filePath)
+	if err != nil {
+		return "", err
+	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", fmt.Errorf("falha ao ler arquivo '%s': %w", filePath, err)
@@ -954,7 +1208,10 @@ func (e *Engine) GetImplementation(project *storage.Project, filePath, symbolNam
 		symbols, _, err := e.symbolRepo.FindSymbol(project.ID, symbolName, 1, 0)
 		if err == nil && len(symbols) > 0 {
 			sym = symbols[0]
-			absPath = filepath.Join(project.Path, sym.File)
+			absPath, err = SafeJoin(project.Path, sym.File)
+			if err != nil {
+				return "", err
+			}
 			content, err = os.ReadFile(absPath)
 			if err != nil {
 				return "", fmt.Errorf("falha ao ler arquivo '%s': %w", sym.File, err)
@@ -980,7 +1237,10 @@ func (e *Engine) GetImplementation(project *storage.Project, filePath, symbolNam
 
 // PeekFile lê um intervalo cirúrgico de linhas com contexto AST, smart anchor e header enriquecido.
 func (e *Engine) PeekFile(project *storage.Project, filePath string, startLine, endLine int, anchorSymbol string) (string, error) {
-	absPath := filepath.Join(project.Path, filePath)
+	absPath, err := SafeJoin(project.Path, filePath)
+	if err != nil {
+		return "", err
+	}
 
 	// Smart Anchor: posiciona janela automaticamente no símbolo
 	anchorWarning := ""
@@ -1022,7 +1282,7 @@ func (e *Engine) PeekFile(project *storage.Project, filePath string, startLine, 
 	if err != nil {
 		return "", fmt.Errorf("falha ao abrir arquivo '%s': %w", filePath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if startLine <= 0 {
 		startLine = 1
@@ -1185,7 +1445,10 @@ func (e *Engine) GrepProject(ctx context.Context, project *storage.Project, patt
 
 	searchRoot := project.Path
 	if pathPrefix != "" {
-		searchRoot = filepath.Join(project.Path, pathPrefix)
+		searchRoot, err = SafeJoin(project.Path, pathPrefix)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	// Prepara o set de extensões permitidas para filtro rápido
@@ -1410,7 +1673,7 @@ func (e *Engine) grepSingleFile(absPath, relPath string, re *regexp.Regexp, cont
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Detecção heurística de binário: lê os primeiros 512 bytes
 	probe := make([]byte, 512)

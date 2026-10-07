@@ -84,3 +84,78 @@ The CLI SHALL require explicit confirmation before deleting project metadata, in
 - **GIVEN** the user executes `astrix clean`
 - **WHEN** the user selects `Cancelar` or presses `Esc`
 - **THEN** the system SHALL exit immediately without modifying the database or printing errors
+
+---
+
+### Requirement: Fast-Path Utility Execution
+Utility commands (`version`, `-v`, `--version`, `help`, `-h`, `--help`) SHALL execute immediately without opening the SQLite database, running database migrations, or instantiating the file watcher.
+
+#### Scenario: User requests version
+- **GIVEN** the user runs `astrix version` or `astrix -v`
+- **WHEN** the command is processed
+- **THEN** the system SHALL print the version to stdout immediately and exit with code 0 without touching database files
+
+#### Scenario: User requests help
+- **GIVEN** the user runs `astrix --help` or `astrix -h`
+- **WHEN** the command is processed
+- **THEN** the system SHALL display the help banner and exit with code 0
+
+---
+
+### Requirement: Machine-Readable Script Output (`--json`)
+The CLI SHALL support the `--json` flag for inspection commands (`ls` and `status`) to provide clean, scriptable JSON output suitable for automation and tooling.
+
+#### Scenario: Listing projects in JSON format
+- **GIVEN** projects are registered in Astrix
+- **WHEN** the user executes `astrix ls --json`
+- **THEN** the output SHALL be a valid JSON array of project objects formatted with indentation
+- **AND** if no projects are registered, it SHALL output an empty JSON array `[]`
+
+#### Scenario: Inspecting status in JSON format
+- **GIVEN** the user executes `astrix status --json`
+- **WHEN** the command is executed
+- **THEN** the output SHALL be a structured JSON object containing `database_path`, `log_path`, `projects_count`, `mcp_server` (`online`, `pid`), and `current_context`
+
+---
+
+### Requirement: Non-Zero Exit Code on Failure
+The CLI SHALL return a non-zero exit code (exit code 1) when any command fails or when an unknown command is invoked.
+
+#### Scenario: Unknown command invocation
+- **GIVEN** the user executes an invalid command `astrix unknown-cmd`
+- **WHEN** the CLI routes the arguments
+- **THEN** it SHALL display an error message and help text, returning a non-zero exit code
+
+---
+
+### Requirement: Concurrency-Safe Dangling Indexing Reset
+The CLI SHALL verify whether an MCP server process is currently active before resetting dangling `indexing` project states to avoid interrupting legitimate in-flight indexing jobs.
+
+#### Scenario: Running CLI command while MCP server is actively indexing
+- **GIVEN** an active `astrix serve` process is indexing a project in background
+- **WHEN** the user runs `astrix ls` or `astrix status` from another terminal
+- **THEN** the CLI SHALL detect the running MCP server PID
+- **AND** it SHALL preserve the in-flight `indexing` project status without resetting it
+
+---
+
+### Requirement: Dedicated Real-Time Watch Command (`astrix watch`)
+The CLI SHALL provide a dedicated `astrix watch` command for real-time monitoring and reindexing that automatically detects whether an MCP server is already active to avoid duplicate watcher conflicts.
+
+#### Scenario: Running `astrix watch` when MCP server is online (Passive Monitor Mode)
+- **GIVEN** an active `astrix serve` instance is running in background (`ReadPID()` reports alive PID)
+- **WHEN** the user executes `astrix watch`
+- **THEN** the CLI SHALL NOT instantiate a secondary fsnotify watcher or compete for SQLite locks
+- **AND** it SHALL attach to the active service log stream, formatting reindexing and delta events in real time to the terminal using standardized badges (`[CAPTURADO]`, `[SINCRONIZADO]`, `[AVISO]`, `[INDEXADO]`) without extraneous icons
+
+#### Scenario: Running `astrix watch` when MCP server is offline (Active Standalone Mode)
+- **GIVEN** no active `astrix serve` instance is running
+- **WHEN** the user executes `astrix watch`
+- **THEN** the CLI SHALL start the `FileWatcherService` directly in the foreground
+- **AND** it SHALL intercept filesystem events, automatically apply incremental deltas to the database, and print live status cards/logs to stdout
+
+#### Scenario: Graceful exit on interruption signal
+- **GIVEN** `astrix watch` is actively running in either passive or active mode
+- **WHEN** the user presses `Ctrl+C` or a SIGINT/SIGTERM signal is received
+- **THEN** the CLI SHALL cleanly stop the watcher or streaming goroutine and terminate with exit code 0
+

@@ -1,14 +1,16 @@
-.PHONY: help build test test-fast clean tidy
+.PHONY: help build test test-fast test-cover lint clean tidy
 
 default: help
 
 help:
 	@echo "Astrix - Development Tasks:"
-	@echo "  make build      - Compila o binário em bin/astrix"
-	@echo "  make test       - Executa todos os testes unitários"
-	@echo "  make test-fast  - Executa testes sem cache com concorrência"
-	@echo "  make tidy       - Executa go mod tidy"
-	@echo "  make clean      - Remove binários temporários"
+	@echo "  make build       - Compila o binário em bin/astrix"
+	@echo "  make test        - Executa todos os testes unitários"
+	@echo "  make test-fast   - Executa testes sem cache com concorrência"
+	@echo "  make test-cover  - Executa testes medindo cobertura sobre os pacotes core"
+	@echo "  make lint        - Executa golangci-lint sobre o projeto"
+	@echo "  make tidy        - Executa go mod tidy"
+	@echo "  make clean       - Remove binários temporários"
 
 VERSION ?= 0.1.0
 LDFLAGS := -s -w -X 'astrix/internal/cli.Version=$(VERSION)'
@@ -22,6 +24,12 @@ test:
 
 test-fast:
 	go test -tags "sqlite_foreign_keys" ./...
+
+test-cover:
+	go test -tags "sqlite_foreign_keys" -coverpkg=./pkg/...,./internal/... ./tests/...
+
+lint:
+	golangci-lint run ./pkg/... ./internal/...
 
 tidy:
 	go mod tidy

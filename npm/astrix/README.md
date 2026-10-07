@@ -2,66 +2,88 @@
 
 > **Fast Code Intelligence & AST Engine for AI Coding Agents**
 
-Astrix indexa codebases com velocidade nativa através de árvores sintáticas (Tree-sitter) e expõe ferramentas contextuais via **Model Context Protocol (MCP)** e CLI interativo para agentes de IA (Cursor, Windsurf, Claude Code, Gemini CLI, Antigravity, etc.).
+Astrix indexes codebases with native speed using Tree-sitter ASTs and exposes token-efficient context tools via the **Model Context Protocol (MCP)** and an interactive CLI for AI coding agents (Cursor, Claude Code, Google Antigravity, Windsurf, GitHub Copilot, etc.).
 
 ---
 
-## 🚀 Instalação Rápida
+## 🚀 Quick Start
 
-### Executar diretamente sem instalar:
+### Run directly without installing:
 ```bash
 npx @prentece/astrix
 ```
 
-### Instalar globalmente no sistema:
+### Install globally:
 ```bash
 npm install -g @prentece/astrix
 ```
 
-Depois de instalado globalmente, use diretamente o comando `astrix`:
+Once installed globally, run `astrix` from any terminal:
 ```bash
 astrix --help
 ```
 
 ---
 
-## 🛠️ Comandos Principais
+## 🤖 Setup with AI Assistants (MCP)
+
+Add Astrix to your assistant's MCP configuration (`~/.cursor/mcp.json`, Claude Desktop, Antigravity, etc.):
+
+```json
+{
+  "mcpServers": {
+    "astrix": {
+      "command": "npx",
+      "args": ["-y", "@prentece/astrix", "serve"]
+    }
+  }
+}
+```
+
+> **Tip:** If installed globally, you can simplify the command to `"command": "astrix"`, `"args": ["serve"]`.
+
+---
+
+## 🛠️ Core Commands
 
 ```bash
-# Inicia o menu interativo com todas as ações
+# Launch interactive context-aware dashboard & onboarding wizard
 astrix
 
-# Exibe a configuração do servidor MCP para editores/agentes
-astrix config
-
-# Inicia o servidor MCP via STDIO
+# Start the MCP server via STDIO (port-free)
 astrix serve
 
-# Lista projetos gerenciados
-astrix ls
+# Monitor filesystem changes in real-time with automatic incremental reindexing
+astrix watch
 
-# Exibe status dos serviços e índices
+# Print MCP configuration snippet for editors/agents (--absolute or --npx)
+astrix config
+
+# Configure AI agent skills (.agents, .cursor, .claude, .github)
+astrix skills
+
+# Check status of registered projects, SQLite database, and active MCP server
 astrix status
 
-# Força a reindexação sintática do repositório atual
-astrix index
+# List all registered projects
+astrix ls
 
-# Configura as SKILLs para agentes (.agents, .cursor, .claude)
-astrix skills
+# Force full reindexing of the current repository
+astrix index
 ```
 
 ---
 
-## 💻 Plataformas Suportadas
+## 💻 Supported Platforms
 
-O pacote `@prentece/astrix` instala automaticamente o binário nativo pré-compilado para o seu sistema:
+The `@prentece/astrix` package automatically resolves and executes the precompiled native binary for your operating system:
 
-- **macOS**: Apple Silicon (`darwin-arm64`) e Intel (`darwin-x64`)
-- **Linux**: x86_64 (`linux-x64`) e ARM64 (`linux-arm64`)
+- **macOS**: Apple Silicon (`darwin-arm64`) and Intel (`darwin-x64`)
+- **Linux**: x86_64 (`linux-x64`) and ARM64 (`linux-arm64`)
 - **Windows**: x86_64 (`win32-x64`)
 
 ---
 
-## 📄 Licença
+## 📄 License
 
 MIT © [prentece](https://github.com/prentece)

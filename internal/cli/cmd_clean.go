@@ -54,7 +54,7 @@ func PrintClean(projService *service.ProjectService, isInteractive ...bool) erro
 		return fmt.Errorf("falha ao remover projeto: %w", err)
 	}
 
-	RemoveSkills(ctx.RootDir)
+	_, _ = RemoveSkills(ctx.RootDir)
 	_ = RemoveProjectConfig(ctx.RootDir)
 
 	if len(isInteractive) > 0 && isInteractive[0] {

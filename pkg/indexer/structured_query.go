@@ -24,7 +24,10 @@ func QueryStructuredFile(rootDir, relPath, query string) (string, error) {
 		return "", fmt.Errorf("expressão de busca (query) é obrigatória")
 	}
 
-	absPath := filepath.Join(rootDir, relPath)
+	absPath, err := SafeJoin(rootDir, relPath)
+	if err != nil {
+		return "", err
+	}
 	ext := strings.ToLower(filepath.Ext(relPath))
 
 	switch ext {
@@ -157,7 +160,7 @@ func queryCSV(absPath, query string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("falha ao abrir arquivo CSV: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	reader := csv.NewReader(file)
 	header, err := reader.Read()
@@ -169,10 +172,7 @@ func queryCSV(absPath, query string) (string, error) {
 	var sb strings.Builder
 
 	// Caso 1: Filtro por valor de coluna -> filter:status=ACTIVE ou status=ACTIVE
-	filterQuery := query
-	if strings.HasPrefix(filterQuery, "filter:") {
-		filterQuery = strings.TrimPrefix(filterQuery, "filter:")
-	}
+	filterQuery := strings.TrimPrefix(query, "filter:")
 	if strings.Contains(filterQuery, "=") {
 		parts := strings.SplitN(filterQuery, "=", 2)
 		colName := strings.TrimSpace(parts[0])
@@ -213,10 +213,7 @@ func queryCSV(absPath, query string) (string, error) {
 	}
 
 	// Caso 2: Seleção de colunas -> columns:id,name ou id,name
-	colsQuery := query
-	if strings.HasPrefix(colsQuery, "columns:") {
-		colsQuery = strings.TrimPrefix(colsQuery, "columns:")
-	}
+	colsQuery := strings.TrimPrefix(query, "columns:")
 	if strings.Contains(colsQuery, ",") {
 		requestedCols := strings.Split(colsQuery, ",")
 		var colIndices []int

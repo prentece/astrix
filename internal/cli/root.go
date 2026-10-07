@@ -18,8 +18,20 @@ import (
 )
 
 // Execute é o ponto de entrada principal da CLI do Astrix.
-func Execute() {
+func Execute() error {
 	args := os.Args[1:]
+
+	// CLI 1: Fast-path para utilitários imediatos (sem abrir banco, migrações ou watcher)
+	if len(args) > 0 {
+		switch args[0] {
+		case "version", "--version", "-v":
+			fmt.Printf("astrix v%s\n", Version)
+			return nil
+		case "help", "--help", "-h":
+			PrintHelp()
+			return nil
+		}
+	}
 
 	dbPath, err := GetDatabasePath()
 	if err != nil {
@@ -30,7 +42,7 @@ func Execute() {
 	if logPath, err := GetLogPath(); err == nil {
 		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
 			log.SetOutput(logFile)
-			defer logFile.Close()
+			defer func() { _ = logFile.Close() }()
 		} else {
 			log.SetOutput(io.Discard)
 		}
@@ -43,10 +55,15 @@ func Execute() {
 	if err != nil {
 		log.Fatalf("[FATAL] Falha ao inicializar banco de dados: %v\n", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	projectRepo := storage.NewProjectRepo(database)
-	_ = projectRepo.ResetDanglingIndexingStatus()
+
+	// CLI 4: Só reseta status pendente se nenhum servidor MCP estiver vivo
+	if _, isAlive := ReadPID(); !isAlive {
+		_ = projectRepo.ResetDanglingIndexingStatus()
+	}
+
 	symbolRepo := storage.NewSymbolRepo(database)
 	depRepo := storage.NewDependencyGraphRepo(database)
 	dataModelRepo := storage.NewDataModelRepo(database)
@@ -54,6 +71,9 @@ func Execute() {
 
 	engine := indexer.NewEngine(projectRepo, symbolRepo, depRepo, dataModelRepo)
 	engine.SetFileStateRepo(fileStateRepo)
+	indexStore := storage.NewIndexStore(database)
+	engine.SetIndexReplacer(indexStore)
+	engine.SetIncrementalApplier(indexStore)
 
 	projectService := service.NewProjectService(projectRepo, symbolRepo, engine)
 	codeService := service.NewCodeService(projectRepo, symbolRepo, depRepo, dataModelRepo, engine)
@@ -63,10 +83,12 @@ func Execute() {
 		projectService.SetWatcher(fileWatcher)
 	}
 
-	printErr := func(err error) {
+	handleErr := func(err error) error {
 		if err != nil && !errors.Is(err, huh.ErrUserAborted) {
 			fmt.Print(ui.ErrorBox(err.Error(), ""))
+			return err
 		}
+		return nil
 	}
 
 	if len(args) == 0 {
@@ -75,52 +97,68 @@ func Execute() {
 		ctx, err := DetectContext(currDir, projectRepo)
 		if err != nil {
 			fmt.Printf("Erro ao detectar contexto: %v\n", err)
-			return
+			return err
 		}
 
 		if ctx.IsRegistered {
 			// Projeto cadastrado: exibe dashboard visual interativo
-			printErr(RunDashboard(projectService, codeService, fileWatcher, ctx))
-			return
+			return handleErr(RunDashboard(projectService, codeService, fileWatcher, ctx))
 		}
 
 		if ctx.IsProject && !ctx.IsRegistered {
 			// Projeto válido mas não cadastrado: dispara wizard interativo
-			printErr(RunWizard(projectService, ctx))
-			return
+			existing, _ := projectRepo.ListAll()
+			isFirstProject := len(existing) == 0
+
+			wizardErr := RunWizard(projectService, ctx)
+			if err := handleErr(wizardErr); err != nil {
+				return err
+			}
+
+			// Boas-vindas: no primeiro projeto cadastrado, abre o painel já pronto para uso
+			if wizardErr == nil && isFirstProject {
+				if newCtx, err := DetectContext(currDir, projectRepo); err == nil && newCtx.IsRegistered {
+					return handleErr(RunDashboard(projectService, codeService, fileWatcher, newCtx))
+				}
+			}
+			return nil
 		}
 
 		// Fora de repositório de projeto: abre painel interativo global
-		printErr(RunGlobalDashboard(projectService, codeService, fileWatcher))
-		return
+		return handleErr(RunGlobalDashboard(projectService, codeService, fileWatcher))
 	}
 
 	command := args[0]
 	switch command {
 	case "ls", "list":
-		printErr(RunList(projectService))
+		return handleErr(RunList(projectService, args[1:]...))
 	case "status":
-		printErr(RunStatus(projectService))
+		return handleErr(RunStatus(projectService, args[1:]...))
 	case "serve", "server":
-		printErr(RunServe(projectService, codeService, fileWatcher))
+		return handleErr(RunServe(projectService, codeService, fileWatcher))
+	case "watch":
+		return handleErr(RunWatch(projectService, codeService, fileWatcher, args[1:]...))
 	case "config":
-		printErr(PrintMCPConfig(true))
+		return handleErr(PrintMCPConfigWithArgs(args[1:]))
 	case "mcp":
-		printErr(RunMCPCommand(args[1:], projectService, codeService, fileWatcher))
+		return handleErr(RunMCPCommand(args[1:], projectService, codeService, fileWatcher))
 	case "index", "reindex", "rebuild":
-		printErr(RunIndex(projectService))
+		return handleErr(RunIndex(projectService))
 	case "clean":
-		printErr(RunClean(projectService))
+		return handleErr(RunClean(projectService))
 	case "skills":
-		printErr(RunSkills(projectService))
+		return handleErr(RunSkills(projectService))
 	case "version", "--version", "-v":
 		fmt.Printf("astrix v%s\n", Version)
+		return nil
 	case "help", "--help", "-h":
 		PrintHelp(projectRepo)
+		return nil
 	default:
 		fmt.Print(ui.ErrorBox(fmt.Sprintf("Comando desconhecido: '%s'", command), ""))
 		fmt.Println()
 		PrintHelp(projectRepo)
+		return fmt.Errorf("comando desconhecido: %s", command)
 	}
 }
 
@@ -143,8 +181,9 @@ func PrintHelp(projectRepo ...storage.ProjectRepository) {
 
 	fmt.Println("  " + cmdTitle.Render("Comandos Globais:"))
 	fmt.Println("    (sem comando)  Abre o menu interativo com todas as ações disponíveis")
+	fmt.Println("    watch          Inicia o monitoramento de arquivos em tempo real (auto-sync)")
 	fmt.Println("    serve          Inicia o servidor MCP via transporte nativo STDIO")
-	fmt.Println("    config         Exibe o JSON de configuração MCP para editores/IA")
+	fmt.Println("    config         Exibe o JSON de configuração MCP (--absolute: caminho completo, --npx: via npx)")
 	fmt.Println("    ls             Lista todos os projetos cadastrados no banco")
 	fmt.Println("    status         Exibe o status dos serviços em background e projetos")
 	fmt.Println()

@@ -39,7 +39,8 @@ const TypeScriptSymbolsQuery = `
 
 (enum_declaration
   name: (identifier) @enum.name) @enum.def
-`// TypeScriptCallersQuery é a S-expression para detecção de chamadas em TypeScript.
+` // TypeScriptCallersQuery é a S-expression para detecção de chamadas em TypeScript.
+
 const TypeScriptCallersQuery = `
 (call_expression
   function: (identifier) @callee)

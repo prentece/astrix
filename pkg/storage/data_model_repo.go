@@ -39,7 +39,20 @@ func (r *DataModelRepo) SaveDataModels(projectID string, modelsList []*DataModel
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
+
+	if err := insertDataModelsTx(tx, projectID, modelsList); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertDataModelsTx insere modelos de dados dentro de uma transação existente.
+func insertDataModelsTx(tx *sql.Tx, projectID string, modelsList []*DataModel) error {
+	if len(modelsList) == 0 {
+		return nil
+	}
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO data_models (project_id, model_name, file, kind, line_number, serialized_fields, created_at)
@@ -48,7 +61,7 @@ func (r *DataModelRepo) SaveDataModels(projectID string, modelsList []*DataModel
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	now := time.Now()
 	for _, m := range modelsList {
@@ -70,8 +83,7 @@ func (r *DataModelRepo) SaveDataModels(projectID string, modelsList []*DataModel
 			return err
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // GetDataModel busca a definição de um modelo de dados pelo nome no projeto.
@@ -129,7 +141,7 @@ func (r *DataModelRepo) ListByProject(projectID string) ([]*DataModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*DataModel
 	for rows.Next() {
@@ -182,7 +194,7 @@ func (r *DataModelRepo) ListDataModels(projectID string, limit, offset int) ([]*
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*DataModel
 	for rows.Next() {

@@ -92,7 +92,6 @@ type GrepMatch struct {
 	ContextAfter  []string `json:"context_after,omitempty"`
 }
 
-
 // DependencyEdge representa um arco no grafo de dependências e injeção do projeto.
 type DependencyEdge struct {
 	ID               int64     `json:"id"`
@@ -125,7 +124,6 @@ type DataModel struct {
 	Fields           []*ModelField `json:"fields"`
 	CreatedAt        time.Time     `json:"created_at"`
 }
-
 
 // IndexingProgress representa o progresso em tempo real da indexação de um repositório.
 type IndexingProgress struct {
@@ -166,8 +164,6 @@ type DeltaReport struct {
 	FilesParsed  int    `json:"files_parsed"`
 	FilesSkipped int    `json:"files_skipped"`
 	FilesDeleted int    `json:"files_deleted"`
-	LLMEnqueued  int    `json:"llm_enqueued"`
-	LLMCacheHits int    `json:"llm_cache_hits"`
 	TotalFiles   int    `json:"total_files"`
 	TotalSymbols int    `json:"total_symbols"`
 	Message      string `json:"message"`

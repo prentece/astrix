@@ -23,7 +23,6 @@ type TestPattern struct {
 	Value string
 }
 
-
 // DependencyExtractor define a capacidade de uma linguagem de extrair dependências e injeções de dependência via AST.
 type DependencyExtractor interface {
 	ExtractDependencies(projectID, relPath string, content []byte, rootNode *sitter.Node) []*storage.DependencyEdge

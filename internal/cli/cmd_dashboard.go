@@ -42,6 +42,7 @@ func RunDashboard(
 				huh.NewSelect[string]().
 					Title("Ações do Projeto").
 					Options(
+						huh.NewOption("Monitorar alterações em tempo real (watch)", "watch"),
 						huh.NewOption("Reindexar projeto (index)", "index"),
 						huh.NewOption("Configurar skills de IA (skills)", "skills"),
 						huh.NewOption("Ver configuração MCP (config)", "config"),
@@ -74,6 +75,8 @@ func RunDashboard(
 
 		var actionErr error
 		switch selectedAction {
+		case "watch":
+			actionErr = RunWatch(projService, codeService, fileWatcher)
 		case "index":
 			actionErr = PrintIndex(projService, false)
 		case "skills":
@@ -132,6 +135,7 @@ func RunGlobalDashboard(
 				huh.NewSelect[string]().
 					Title("Menu Principal").
 					Options(
+						huh.NewOption("Monitorar alterações em tempo real (watch)", "watch"),
 						huh.NewOption("Listar projetos cadastrados (ls)", "ls"),
 						huh.NewOption("Status geral do sistema (status)", "status"),
 						huh.NewOption("Ver configuração MCP (config)", "config"),
@@ -161,6 +165,8 @@ func RunGlobalDashboard(
 
 		var actionErr error
 		switch selectedAction {
+		case "watch":
+			actionErr = RunWatch(projService, codeService, fileWatcher)
 		case "ls":
 			actionErr = PrintList(projService, false)
 		case "status":
@@ -189,7 +195,7 @@ func waitForReturn() {
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err == nil {
-		defer term.Restore(int(os.Stdin.Fd()), oldState)
+		defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 		var buf [1]byte
 		_, _ = os.Stdin.Read(buf[:])
 		return
@@ -197,4 +203,3 @@ func waitForReturn() {
 	var buf [1]byte
 	_, _ = os.Stdin.Read(buf[:])
 }
-

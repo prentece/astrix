@@ -28,7 +28,7 @@ func RunWizard(projService *service.ProjectService, ctx *ProjectContext) error {
 	}
 
 	var selectedAgentStrings []string
-	var confirmSetup bool = true
+	confirmSetup := true
 
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -81,8 +81,8 @@ func RunWizard(projService *service.ProjectService, ctx *ProjectContext) error {
 			return fmt.Errorf("falha ao criar projeto: %w", err)
 		}
 
-		_ = SaveProjectConfig(ctx.RootDir, proj.ID, ctx.Name, ctx.DetectedLang)
-		_ = SetupSkills(ctx.RootDir, proj.ID, ctx.Name, selectedAgents)
+		_ = SaveProjectConfig(ctx.RootDir, proj.ID, proj.Name, proj.Language)
+		_ = SetupSkills(ctx.RootDir, proj.ID, proj.Name, selectedAgents)
 
 		indexed, err := projService.ReindexProject(proj.ID)
 		if err != nil {
@@ -91,7 +91,6 @@ func RunWizard(projService *service.ProjectService, ctx *ProjectContext) error {
 		indexedProj = indexed
 		return nil
 	})
-
 	if err != nil {
 		fmt.Println(ui.ErrorBox("Falha no Cadastro", err.Error()))
 		return err

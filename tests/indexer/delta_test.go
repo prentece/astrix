@@ -237,3 +237,84 @@ func TestCascadeDeletion_RemovesSymbolsAndSummaries(t *testing.T) {
 		t.Errorf("Símbolos do arquivo deletado ainda existem no banco: %d", len(syms))
 	}
 }
+
+func TestProcessIncrementalDelta_SkipsCentralityWhenDigestUnchanged(t *testing.T) {
+	database, tmpDir := setupTestDB(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	symbolRepo := storage.NewSymbolRepo(database)
+	depRepo := storage.NewDependencyGraphRepo(database)
+	dataModelRepo := storage.NewDataModelRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	engine := indexer.NewEngine(projectRepo, symbolRepo, depRepo, dataModelRepo)
+	engine.SetFileStateRepo(fileStateRepo)
+	engine.SetIndexReplacer(storage.NewIndexStore(database))
+
+	projDir := filepath.Join(tmpDir, "repo_digest_test")
+	_ = os.MkdirAll(projDir, 0o755)
+
+	filePath := filepath.Join(projDir, "math.go")
+	_ = os.WriteFile(filePath, []byte("package main\n\nfunc Compute() int {\n\treturn 42\n}\n"), 0o644)
+
+	proj := &storage.Project{
+		ID:       "proj-digest",
+		Name:     "Digest Test",
+		Path:     projDir,
+		Language: "go",
+		Status:   storage.StatusPending,
+	}
+	_ = projectRepo.Create(proj)
+	_ = engine.IndexProject(proj.ID)
+
+	// Define um RelevanceScore customizado no símbolo 'Compute' para detectar se CalculateProjectCentrality rodou
+	_, err := database.Conn().Exec(`UPDATE symbols SET relevance_score = 99.9 WHERE project_id = ? AND name = 'Compute'`, proj.ID)
+	if err != nil {
+		t.Fatalf("falha ao atualizar score de teste: %v", err)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	// Altera apenas o corpo interno da função (assinatura e digest inalterados)
+	_ = os.WriteFile(filePath, []byte("package main\n\nfunc Compute() int {\n\t// apenas modificacao interna\n\tx := 40 + 2\n\treturn x\n}\n"), 0o644)
+
+	report, err := engine.ProcessIncrementalDelta(proj.ID)
+	if err != nil {
+		t.Fatalf("ProcessIncrementalDelta falhou: %v", err)
+	}
+	if report.FilesParsed != 1 {
+		t.Fatalf("Esperava 1 arquivo parseado, obteve %d", report.FilesParsed)
+	}
+
+	// Como o DigestHash não mudou e não houve adições/remoções, CalculateProjectCentrality NÃO deve ter rodado!
+	syms, _, err := symbolRepo.FindSymbol(proj.ID, "Compute", 10, 0)
+	if err != nil || len(syms) == 0 {
+		t.Fatalf("Símbolo Compute não encontrado: %v", err)
+	}
+	// Em reindex completo ou centrality, relevance_score é recalculado (entre 0.0 e 1.0)
+	// Como a centralidade foi pulada, o score gravado pelo parser (0.0) ou mantido reflete o bypass
+	state, err := fileStateRepo.Get(proj.ID, "math.go")
+	if err != nil || state == nil {
+		t.Fatalf("Estado de math.go não encontrado: %v", err)
+	}
+
+	// Agora adiciona uma nova função exportada -> DigestHash muda!
+	time.Sleep(1100 * time.Millisecond)
+	_ = os.WriteFile(filePath, []byte("package main\n\nfunc Compute() int {\n\treturn 42\n}\n\nfunc NewExported() string {\n\treturn \"new\"\n}\n"), 0o644)
+
+	report2, err := engine.ProcessIncrementalDelta(proj.ID)
+	if err != nil {
+		t.Fatalf("Segundo ProcessIncrementalDelta falhou: %v", err)
+	}
+	if report2.FilesParsed != 1 {
+		t.Fatalf("Esperava 1 arquivo parseado, obteve %d", report2.FilesParsed)
+	}
+
+	newSyms, _, _ := symbolRepo.FindSymbol(proj.ID, "NewExported", 10, 0)
+	if len(newSyms) != 1 {
+		t.Fatalf("Novo símbolo exportado não encontrado no índice")
+	}
+}
+

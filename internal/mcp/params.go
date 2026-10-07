@@ -1,8 +1,16 @@
 package mcp
 
 import (
+	"astrix/internal/service"
+	"astrix/pkg/storage"
+	"context"
 	"encoding/json"
+	"fmt"
+	"log"
+	"runtime/debug"
 	"strings"
+
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // getStringParam extrai estritamente uma string da chave informada.
@@ -74,3 +82,117 @@ func parseJSON(raw string, dest any) error {
 	return json.Unmarshal([]byte(raw), dest)
 }
 
+// getFilePathParam extrai o caminho do arquivo aceitando tanto 'filepath' quanto o alias 'path'.
+func getFilePathParam(args map[string]any) string {
+	fp := getStringParam(args, "filepath")
+	if fp == "" {
+		fp = getStringParam(args, "path")
+	}
+	return fp
+}
+
+// safeToolHandler envolve um handler de tool em um bloco recover para que qualquer panic
+// não derrube o processo MCP e a conexão STDIO com o cliente.
+func safeToolHandler(fn func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error)) func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (res *mcp.CallToolResult, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[MCP TOOL PANIC] Recuperado de panic na tool: %v\n%s\n", r, string(debug.Stack()))
+				res = mcp.NewToolResultError(fmt.Sprintf("Internal error: unexpected panic recovered: %v", r))
+				err = nil
+			}
+		}()
+		return fn(ctx, req)
+	}
+}
+
+// checkProjectWarning retorna um alerta descritivo caso o projeto esteja sendo indexado, pendente ou em erro.
+func checkProjectWarning(codeService *service.CodeService, projectID string) string {
+	if codeService == nil || projectID == "" {
+		return ""
+	}
+	proj, prog, err := codeService.GetProjectStatus(projectID)
+	if err != nil || proj == nil {
+		return ""
+	}
+	if proj.Status == storage.StatusIndexing {
+		if prog != nil && prog.IsIndexing && prog.TotalFiles > 0 {
+			return fmt.Sprintf("[INDEXING %d%% (%d/%d arquivos)] Este projeto está sendo indexado. Os resultados podem estar parciais.", prog.Percent, prog.ProcessedFiles, prog.TotalFiles)
+		}
+		return "[INDEXING] Este projeto está em processo de indexação. Os resultados podem estar parciais."
+	}
+	if proj.Status == storage.StatusPending {
+		return "[PENDING] A indexação deste projeto ainda não foi concluída. Os resultados podem estar incompletos."
+	}
+	if proj.Status == storage.StatusError {
+		errMsg := proj.ErrorMessage
+		if errMsg == "" {
+			errMsg = "falha desconhecida"
+		}
+		return fmt.Sprintf("[STALE INDEX] Erro na última indexação: %s. Os dados podem estar desatualizados.", errMsg)
+	}
+	return ""
+}
+
+// toolResultWithWarning retorna um CallToolResult com o payload principal e, caso exista warning,
+// inclui o aviso como um bloco TextContent separado no MCP, garantindo que payloads JSON não sejam corrompidos.
+func toolResultWithWarning(text, warning string) *mcp.CallToolResult {
+	if warning == "" {
+		return mcp.NewToolResultText(text)
+	}
+	return &mcp.CallToolResult{
+		Content: []interface{}{
+			mcp.NewTextContent(warning),
+			mcp.NewTextContent(text),
+		},
+	}
+}
+
+// prependWarning prefixa o aviso de estado ao texto retornado caso exista (fallback para texto puro).
+func prependWarning(text, warning string) string {
+	if warning == "" {
+		return text
+	}
+	return warning + "\n\n" + text
+}
+
+// WithArray define um schema de array com itemSchema no InputSchema da ferramenta.
+func WithArray(name string, itemSchema map[string]any, description string, required bool) mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		if t.InputSchema.Properties == nil {
+			t.InputSchema.Properties = make(map[string]interface{})
+		}
+		t.InputSchema.Properties[name] = map[string]interface{}{
+			"type":        "array",
+			"items":       itemSchema,
+			"description": description,
+		}
+		if required {
+			t.InputSchema.Required = append(t.InputSchema.Required, name)
+		}
+	}
+}
+
+// WithArrayOrString define um schema que aceita tanto um array de objetos quanto uma string (JSON serializada).
+func WithArrayOrString(name string, itemSchema map[string]any, description string, required bool) mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		if t.InputSchema.Properties == nil {
+			t.InputSchema.Properties = make(map[string]interface{})
+		}
+		t.InputSchema.Properties[name] = map[string]interface{}{
+			"description": description,
+			"oneOf": []interface{}{
+				map[string]interface{}{
+					"type":  "array",
+					"items": itemSchema,
+				},
+				map[string]interface{}{
+					"type": "string",
+				},
+			},
+		}
+		if required {
+			t.InputSchema.Required = append(t.InputSchema.Required, name)
+		}
+	}
+}

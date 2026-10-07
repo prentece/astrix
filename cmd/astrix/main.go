@@ -1,7 +1,12 @@
 package main
 
-import "astrix/internal/cli"
+import (
+	"astrix/internal/cli"
+	"os"
+)
 
 func main() {
-	cli.Execute()
+	if err := cli.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

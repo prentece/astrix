@@ -10,11 +10,11 @@ import (
 
 // CodeService gerencia operações de inteligência de código, AST, busca semântica e leitura cirúrgica.
 type CodeService struct {
-	projectRepo    storage.ProjectRepository
-	symbolRepo     storage.SymbolRepository
-	depRepo        storage.DependencyGraphRepository
-	dataModelRepo  storage.DataModelRepository
-	engine         *indexer.Engine
+	projectRepo   storage.ProjectRepository
+	symbolRepo    storage.SymbolRepository
+	depRepo       storage.DependencyGraphRepository
+	dataModelRepo storage.DataModelRepository
+	engine        *indexer.Engine
 }
 
 // NewCodeService cria uma nova instância de CodeService.
@@ -32,6 +32,22 @@ func NewCodeService(
 		dataModelRepo: dataModelRepo,
 		engine:        engine,
 	}
+}
+
+// GetProjectStatus retorna os metadados de status e progresso de indexação do projeto.
+func (s *CodeService) GetProjectStatus(projectID string) (*storage.Project, *storage.IndexingProgress, error) {
+	if s.projectRepo == nil || projectID == "" {
+		return nil, nil, nil
+	}
+	proj, err := s.projectRepo.GetByID(projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var prog *storage.IndexingProgress
+	if s.engine != nil {
+		prog = s.engine.GetIndexingProgress(projectID)
+	}
+	return proj, prog, nil
 }
 
 // FindSymbol busca símbolos na tabela AST com correspondência exata ou parcial e suporte a paginação.
@@ -286,7 +302,6 @@ func (s *CodeService) QueryStructuredFile(projectID, filePath, query string) (st
 	return indexer.QueryStructuredFile(proj.Path, relPath, query)
 }
 
-
 // ArchitectureGraphNode representa um nó na árvore do grafo de dependências arquiteturais.
 type ArchitectureGraphNode struct {
 	Symbol       string                   `json:"symbol"`
@@ -420,7 +435,6 @@ func (s *CodeService) ListDataModels(projectID string) ([]*storage.DataModel, er
 
 	return s.dataModelRepo.ListByProject(projectID)
 }
-
 
 // GetSymbolStats retorna estatísticas de mapeamento de símbolos por arquivo para a tela de mapeamento.
 func (s *CodeService) GetSymbolStats(projectID string) ([]*storage.FileSymbolStats, error) {

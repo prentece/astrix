@@ -19,11 +19,11 @@
 ## ✨ Features
 
 - 🌳 **Polyglot AST Indexing** — Parses Go, TypeScript/JavaScript, Python, Java, and PHP via Tree-sitter
-- ⚡ **Incremental Delta Indexing** — SHA-256 hashing skips unchanged files; only modified files are re-parsed
+- ⚡ **Incremental Delta Indexing** — Two-Tier Hash evaluation (mtime/size fast check + SHA-256 digest) with atomic SQLite transactions skips unchanged files
 - 📡 **MCP Server (STDIO)** — Native JSON-RPC 2.0 transport, zero port conflicts, client-managed lifecycle
 - 🔍 **Symbol Lookup** — Find function/class definitions and all their reference sites across the codebase
 - 📐 **Architectural Centrality** — PageRank-based dependency graph highlights architectural core nodes ("God Nodes")
-- 👁️ **Real-Time File Watcher** — Debounced fsnotify watcher triggers auto-reindexing on every save
+- 👁️ **Real-Time File Watcher** — Debounced fsnotify watcher with dual execution modes (active standalone or zero-contention passive stream)
 - 🛡️ **Security Boundaries** — Path traversal protection and bounded line-slice validation built-in
 - 🤖 **Multi-Agent Skill Generation** — Generates configuration files for Antigravity, Cursor, Claude Code, and GitHub Copilot
 - 🖥️ **Interactive TUI** — Context-aware terminal UI powered by Bubble Tea and Lip Gloss
@@ -83,9 +83,23 @@ astrix
 # Or list already registered projects
 astrix ls
 
-# Check system status
+# Check system and server status
 astrix status
+
+# Force full reindexing of the current repository
+astrix index
 ```
+
+### Real-time file watching
+
+```bash
+# Monitor changes in real-time with automated incremental reindexing
+astrix watch
+```
+
+`astrix watch` automatically checks whether the MCP server (`astrix serve`) is already running in background:
+- **Passive Monitor Mode**: If the MCP server is online, `astrix watch` streams real-time events (`[CAPTURADO]`, `[SINCRONIZADO]`, `[AVISO]`) without duplicating file watchers or competing for database locks.
+- **Active Standalone Mode**: If no server is running, it starts the `FileWatcherService` directly in the foreground.
 
 ### Configure AI agent skills
 
@@ -95,13 +109,26 @@ astrix skills
 
 Select which AI assistants you use — Astrix writes the appropriate skill/rules files so your agents know how to query the MCP server.
 
+### Generate MCP configuration
+
+```bash
+# Print standard MCP configuration JSON
+astrix config
+
+# Print configuration with absolute binary path
+astrix config --absolute
+
+# Print configuration using npx
+astrix config --npx
+```
+
 ### Start the MCP server
 
 ```bash
 astrix serve
 ```
 
-Add it to your AI assistant's MCP configuration:
+Add it to your AI assistant's MCP configuration (`~/.cursor/mcp.json`, Claude Desktop, etc.):
 
 ```json
 {
@@ -109,6 +136,19 @@ Add it to your AI assistant's MCP configuration:
     "astrix": {
       "command": "astrix",
       "args": ["serve"]
+    }
+  }
+}
+```
+
+Or using `npx` directly without global installation:
+
+```json
+{
+  "mcpServers": {
+    "astrix": {
+      "command": "npx",
+      "args": ["-y", "@prentece/astrix", "serve"]
     }
   }
 }

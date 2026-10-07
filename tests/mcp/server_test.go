@@ -53,5 +53,5 @@ func TestMCPServer_InitializeIdentity(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Equal(t, "astrix", resp.Result.ServerInfo.Name)
-	assert.Equal(t, "0.0.1", resp.Result.ServerInfo.Version)
+	assert.Equal(t, "0.1.0", resp.Result.ServerInfo.Version)
 }
