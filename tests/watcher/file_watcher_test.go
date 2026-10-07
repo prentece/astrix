@@ -522,5 +522,44 @@ func TestFileWatcher_JavaScriptLifecycle(t *testing.T) {
 	assert.Equal(t, 1, p.SymbolCount)
 }
 
+func TestFileWatcher_Restartability(t *testing.T) {
+	database, engine, tmpDir := setupTestWatcherEnv(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
 
+	projectRepo := storage.NewProjectRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
 
+	watcherService, err := watcher.NewFileWatcherService(projectRepo, fileStateRepo, engine)
+	require.NoError(t, err)
+
+	repoDir := filepath.Join(tmpDir, "restart_repo")
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+	file1 := filepath.Join(repoDir, "app.go")
+	require.NoError(t, os.WriteFile(file1, []byte("package main\nfunc App() {}\n"), 0o644))
+
+	proj := &storage.Project{
+		ID:       "proj-restart",
+		Name:     "Restart Project",
+		Path:     repoDir,
+		Language: "go",
+		Status:   storage.StatusReady,
+		AutoSync: true,
+	}
+	require.NoError(t, projectRepo.Create(proj))
+
+	// Ciclo 1: Start -> Stop
+	err = watcherService.Start()
+	require.NoError(t, err)
+	watcherService.Stop()
+
+	// Ciclo 2: Start -> Stop (deve reiniciar fsnotify e contexto sem erros)
+	err = watcherService.Start()
+	require.NoError(t, err)
+	watcherService.Stop()
+
+	// Ciclo 3: Start -> Stop
+	err = watcherService.Start()
+	require.NoError(t, err)
+	watcherService.Stop()
+}

@@ -136,6 +136,8 @@ func Execute() error {
 		return handleErr(RunStatus(projectService, args[1:]...))
 	case "serve", "server":
 		return handleErr(RunServe(projectService, codeService, fileWatcher))
+	case "watch":
+		return handleErr(RunWatch(projectService, codeService, fileWatcher, args[1:]...))
 	case "config":
 		return handleErr(PrintMCPConfigWithArgs(args[1:]))
 	case "mcp":
@@ -179,6 +181,7 @@ func PrintHelp(projectRepo ...storage.ProjectRepository) {
 
 	fmt.Println("  " + cmdTitle.Render("Comandos Globais:"))
 	fmt.Println("    (sem comando)  Abre o menu interativo com todas as ações disponíveis")
+	fmt.Println("    watch          Inicia o monitoramento de arquivos em tempo real (auto-sync)")
 	fmt.Println("    serve          Inicia o servidor MCP via transporte nativo STDIO")
 	fmt.Println("    config         Exibe o JSON de configuração MCP (--absolute: caminho completo, --npx: via npx)")
 	fmt.Println("    ls             Lista todos os projetos cadastrados no banco")

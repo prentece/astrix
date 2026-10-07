@@ -69,3 +69,32 @@ The File Watcher SHALL cleanly release operating system file descriptors and gor
 - **THEN** the watcher SHALL cancel active debounce timers and discard pending flags
 - **AND** the watcher SHALL remove watches from `fsnotify` using the in-memory registered directory list, even if the directory on disk was already deleted
 - **AND** background polling routines SHALL exit immediately when context is cancelled
+
+---
+
+### Requirement: Dual-Mode Watch Execution (Embedded vs Standalone CLI)
+The File Watcher architecture SHALL support running both embedded within the MCP server process (`astrix serve`) and standalone in the interactive terminal (`astrix watch`), preventing concurrent watcher conflicts via PID checks.
+
+#### Scenario: Standalone CLI starts watcher when no server is running
+- **GIVEN** no MCP server is running (`ReadPID()` is inactive)
+- **WHEN** `astrix watch` starts
+- **THEN** the CLI SHALL initialize and start `FileWatcherService` directly, monitoring registered projects and auto-syncing modifications to SQLite
+
+#### Scenario: Standalone CLI defers watcher when server is already running
+- **GIVEN** an MCP server is running (`ReadPID()` is active)
+- **WHEN** `astrix watch` starts
+- **THEN** the CLI SHALL NOT start a concurrent `FileWatcherService`
+- **AND** the CLI SHALL stream the centralized log output in passive mode, preventing SQLite write contention
+
+---
+
+### Requirement: Restartable Lifecycle
+The `FileWatcherService` SHALL support repeated `Start()` and `Stop()` cycles within the same process without errors, dynamically allocating a new OS watcher and context upon each restart.
+
+#### Scenario: Watcher restarted after stopping
+- **GIVEN** `FileWatcherService` has been started and subsequently stopped via `Stop()`
+- **WHEN** `Start()` is invoked again on the same instance
+- **THEN** the service SHALL instantiate a fresh `fsnotify.Watcher` and cancellation context
+- **AND** it SHALL re-register project directories without reporting `fsnotify: watcher already closed`
+
+

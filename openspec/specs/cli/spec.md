@@ -137,3 +137,25 @@ The CLI SHALL verify whether an MCP server process is currently active before re
 - **THEN** the CLI SHALL detect the running MCP server PID
 - **AND** it SHALL preserve the in-flight `indexing` project status without resetting it
 
+---
+
+### Requirement: Dedicated Real-Time Watch Command (`astrix watch`)
+The CLI SHALL provide a dedicated `astrix watch` command for real-time monitoring and reindexing that automatically detects whether an MCP server is already active to avoid duplicate watcher conflicts.
+
+#### Scenario: Running `astrix watch` when MCP server is online (Passive Monitor Mode)
+- **GIVEN** an active `astrix serve` instance is running in background (`ReadPID()` reports alive PID)
+- **WHEN** the user executes `astrix watch`
+- **THEN** the CLI SHALL NOT instantiate a secondary fsnotify watcher or compete for SQLite locks
+- **AND** it SHALL attach to the active service log stream, formatting reindexing and delta events in real time to the terminal using standardized badges (`[CAPTURADO]`, `[SINCRONIZADO]`, `[AVISO]`, `[INDEXADO]`) without extraneous icons
+
+#### Scenario: Running `astrix watch` when MCP server is offline (Active Standalone Mode)
+- **GIVEN** no active `astrix serve` instance is running
+- **WHEN** the user executes `astrix watch`
+- **THEN** the CLI SHALL start the `FileWatcherService` directly in the foreground
+- **AND** it SHALL intercept filesystem events, automatically apply incremental deltas to the database, and print live status cards/logs to stdout
+
+#### Scenario: Graceful exit on interruption signal
+- **GIVEN** `astrix watch` is actively running in either passive or active mode
+- **WHEN** the user presses `Ctrl+C` or a SIGINT/SIGTERM signal is received
+- **THEN** the CLI SHALL cleanly stop the watcher or streaming goroutine and terminate with exit code 0
+

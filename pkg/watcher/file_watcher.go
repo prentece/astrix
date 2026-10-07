@@ -79,8 +79,29 @@ func NewFileWatcherService(
 	}, nil
 }
 
+// ensureWatcherLocked garante que o watcher fsnotify e o contexto estejam ativos e prontos para uso.
+func (w *FileWatcherService) ensureWatcherLocked() error {
+	if w.watcher == nil || (w.ctx != nil && w.ctx.Err() != nil) {
+		fsWatcher, err := fsnotify.NewWatcher()
+		if err != nil {
+			return fmt.Errorf("falha ao inicializar fsnotify: %w", err)
+		}
+		w.watcher = fsWatcher
+		w.ctx, w.cancelFunc = context.WithCancel(context.Background())
+	}
+	return nil
+}
+
 // Start inicializa os watchers para todos os projetos cadastrados e o loop de eventos.
+// É idempotente e reinicializável caso Stop() tenha sido chamado previamente.
 func (w *FileWatcherService) Start() error {
+	w.mu.Lock()
+	if err := w.ensureWatcherLocked(); err != nil {
+		w.mu.Unlock()
+		return err
+	}
+	w.mu.Unlock()
+
 	projects, err := w.projectRepo.ListAll()
 	if err == nil {
 		for _, proj := range projects {
@@ -100,22 +121,34 @@ func (w *FileWatcherService) Start() error {
 	return nil
 }
 
-// Stop desliga o watcher e cancela o contexto.
+// Stop desliga o watcher, cancela o contexto e libera recursos de forma limpa, permitindo reinício posterior.
 func (w *FileWatcherService) Stop() {
-	w.cancelFunc()
-
 	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.cancelFunc != nil {
+		w.cancelFunc()
+	}
+
 	for _, timer := range w.debounceTimers {
 		if timer != nil {
 			timer.Stop()
 		}
 	}
 	w.debounceTimers = make(map[string]*time.Timer)
-	w.mu.Unlock()
 
 	if w.watcher != nil {
 		_ = w.watcher.Close()
+		w.watcher = nil
 	}
+
+	w.watchedDirs = make(map[string]map[string]bool)
+	w.watchedProjects = make(map[string]*storage.Project)
+	w.pathProjects = make(map[string]string)
+	w.pendingEventPaths = make(map[string]map[string]bool)
+	w.pendingDeltas = make(map[string]*storage.DeltaResult)
+	w.dirtyDuringSync = make(map[string]bool)
+	w.syncingMap = make(map[string]bool)
 }
 
 // WatchProject adiciona um projeto e suas subpastas não ignoradas ao monitoramento de arquivos.
@@ -131,6 +164,10 @@ func (w *FileWatcherService) WatchProject(proj *storage.Project) error {
 	}
 
 	w.mu.Lock()
+	if err := w.ensureWatcherLocked(); err != nil {
+		w.mu.Unlock()
+		return err
+	}
 	w.watchedProjects[proj.ID] = proj
 	w.pathProjects[cleanPath] = proj.ID
 	w.autoSync[proj.ID] = proj.AutoSync
@@ -160,7 +197,14 @@ func (w *FileWatcherService) WatchProject(proj *storage.Project) error {
 			return filepath.SkipDir
 		}
 
-		if err := w.watcher.Add(path); err == nil {
+		w.mu.RLock()
+		fsWatcher := w.watcher
+		w.mu.RUnlock()
+		if fsWatcher == nil {
+			return filepath.SkipDir
+		}
+
+		if err := fsWatcher.Add(path); err == nil {
 			addedDirs++
 			w.mu.Lock()
 			if dirSet, ok := w.watchedDirs[proj.ID]; ok {
@@ -349,18 +393,27 @@ func (w *FileWatcherService) TriggerSync(projectID string) (*storage.DeltaReport
 
 // eventLoop processa eventos emitidos pelo fsnotify.
 func (w *FileWatcherService) eventLoop() {
+	w.mu.RLock()
+	watcher := w.watcher
+	ctx := w.ctx
+	w.mu.RUnlock()
+
+	if watcher == nil || ctx == nil {
+		return
+	}
+
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 
-		case event, ok := <-w.watcher.Events:
+		case event, ok := <-watcher.Events:
 			if !ok {
 				return
 			}
 			w.handleFsnotifyEvent(event)
 
-		case err, ok := <-w.watcher.Errors:
+		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
@@ -546,7 +599,15 @@ func (w *FileWatcherService) processDebouncedChanges(projectID string) {
 
 // fallbackDeltaTicker realiza varreduras periódicas leves em segundo plano para robustez total (WSL2/Docker).
 func (w *FileWatcherService) fallbackDeltaTicker() {
+	w.mu.RLock()
+	ctx := w.ctx
 	interval := w.fallbackInterval
+	w.mu.RUnlock()
+
+	if ctx == nil {
+		return
+	}
+
 	if interval < 1*time.Second {
 		interval = 30 * time.Second
 	}
@@ -555,7 +616,7 @@ func (w *FileWatcherService) fallbackDeltaTicker() {
 
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			w.runFallbackScan()
