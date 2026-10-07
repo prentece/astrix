@@ -118,3 +118,28 @@ The Indexer Engine SHALL persist the result of a full reindex without ever leavi
 
 ### Requirement: Project-Root Confinement for File Access
 The Indexer SHALL resolve every client-supplied relative path with `SafeJoin` and MUST NOT read or walk outside the project root, including through symlinks (see the Service specification for the observable behavior).
+
+---
+
+### Requirement: Repository Walking and Filtering
+The repository scanner SHALL discover indexable code files while honoring root `.gitignore`, `.git/info/exclude`, and nested `.gitignore` files, ignoring binary files and oversized files.
+
+#### Scenario: Nested gitignores and exclude rules
+- **GIVEN** a project with `.gitignore` in subdirectories or local exclude rules in `.git/info/exclude`
+- **WHEN** `ScanRepository` or `LoadGitIgnore` processes the directory tree
+- **THEN** all nested and exclude patterns SHALL be combined and enforced relative to the project root
+
+#### Scenario: Binary and oversized file exclusion
+- **GIVEN** a binary file (containing NUL bytes `0x00`) or a file exceeding `MaxIndexableFileSize` (2MB)
+- **WHEN** `ScanRepository` inspects the candidate file
+- **THEN** the file SHALL be skipped from AST parsing without generating error logs
+
+---
+
+### Requirement: Unified Language Registry
+All components requiring language detection SHALL derive the language from the central `LanguageConfig` registry as the single source of truth, with fallback for non-AST documentation and structured config formats.
+
+#### Scenario: Detecting file language
+- **GIVEN** a file with a supported language extension (e.g. `.go`, `.ts`, `.py`, `.java`, `.php`)
+- **WHEN** language detection is performed
+- **THEN** it SHALL resolve directly from the registered `LanguageConfig`

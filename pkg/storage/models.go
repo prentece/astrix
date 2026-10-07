@@ -166,8 +166,6 @@ type DeltaReport struct {
 	FilesParsed  int    `json:"files_parsed"`
 	FilesSkipped int    `json:"files_skipped"`
 	FilesDeleted int    `json:"files_deleted"`
-	LLMEnqueued  int    `json:"llm_enqueued"`
-	LLMCacheHits int    `json:"llm_cache_hits"`
 	TotalFiles   int    `json:"total_files"`
 	TotalSymbols int    `json:"total_symbols"`
 	Message      string `json:"message"`

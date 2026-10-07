@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// DeltaEngine gerencia a detecção híbrida de alterações em repositórios (Git + Stat Cache).
+// DeltaEngine gerencia a detecção de alterações em repositórios (Stat Cache + Event Stat).
 type DeltaEngine struct {
 	fileStateRepo storage.FileStateRepository
 }

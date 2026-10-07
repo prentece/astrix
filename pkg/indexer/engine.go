@@ -125,44 +125,41 @@ func (e *Engine) getOrCompileQuery(lang *sitter.Language, langName, queryType, q
 	return compiled, nil
 }
 
-// detectLanguageByExtension detecta a linguagem de programação com base na extensão do arquivo.
+// supplementalExtLanguages mapeia extensões sem gramática Tree-sitter completa para nomes amigáveis.
+var supplementalExtLanguages = map[string]string{
+	".sql":   "sql",
+	".html":  "html",
+	".css":   "css",
+	".scss":  "scss",
+	".yaml":  "yaml",
+	".yml":   "yaml",
+	".json":  "json",
+	".xml":   "xml",
+	".md":    "markdown",
+	".sh":    "shell",
+	".bash":  "shell",
+	".lua":   "lua",
+	".dart":  "dart",
+	".ex":    "elixir",
+	".exs":   "elixir",
+	".kt":    "kotlin",
+	".rs":    "rust",
+	".rb":    "ruby",
+	".cs":    "csharp",
+	".cpp":   "cpp",
+	".c":     "c",
+	".h":     "c",
+	".hpp":   "cpp",
+	".swift": "swift",
+}
+
+// detectLanguageByExtension detecta a linguagem derivando prioritariamente do registry central de LanguageConfig.
 func detectLanguageByExtension(filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	langMap := map[string]string{
-		".go":    "go",
-		".ts":    "typescript",
-		".tsx":   "typescript",
-		".js":    "javascript",
-		".jsx":   "javascript",
-		".py":    "python",
-		".java":  "java",
-		".kt":    "kotlin",
-		".rs":    "rust",
-		".rb":    "ruby",
-		".php":   "php",
-		".cs":    "csharp",
-		".cpp":   "cpp",
-		".c":     "c",
-		".h":     "c",
-		".hpp":   "cpp",
-		".swift": "swift",
-		".sql":   "sql",
-		".html":  "html",
-		".css":   "css",
-		".scss":  "scss",
-		".yaml":  "yaml",
-		".yml":   "yaml",
-		".json":  "json",
-		".xml":   "xml",
-		".md":    "markdown",
-		".sh":    "shell",
-		".bash":  "shell",
-		".lua":   "lua",
-		".dart":  "dart",
-		".ex":    "elixir",
-		".exs":   "elixir",
+	if cfg, ok := GetConfigByFilePath(filePath); ok {
+		return cfg.Name()
 	}
-	if lang, ok := langMap[ext]; ok {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if lang, ok := supplementalExtLanguages[ext]; ok {
 		return lang
 	}
 	if ext != "" {
@@ -847,8 +844,8 @@ func (e *Engine) ProcessIncrementalDelta(projectID string) (*storage.DeltaReport
 	}
 
 	report.DurationMs = time.Since(startTime).Milliseconds()
-	report.Message = fmt.Sprintf("Delta sincronizado via %s em %dms: %d parseados, %d ignorados, %d deletados, %d LLM hits",
-		report.Strategy, report.DurationMs, report.FilesParsed, report.FilesSkipped, report.FilesDeleted, report.LLMCacheHits)
+	report.Message = fmt.Sprintf("Delta sincronizado via %s em %dms: %d parseados, %d ignorados, %d deletados",
+		report.Strategy, report.DurationMs, report.FilesParsed, report.FilesSkipped, report.FilesDeleted)
 
 	log.Printf("[DELTA INDEXER SUCCESS] %s\n", report.Message)
 	return report, nil
@@ -930,6 +927,10 @@ func (e *Engine) ExtractASTDataAndDigest(
 	rootNode := tree.RootNode()
 	if rootNode == nil {
 		return nil, fmt.Errorf("rootNode nulo para %s", relPath)
+	}
+
+	if rootNode.HasError() {
+		log.Printf("[TREE-SITTER WARN] Arquivo '%s' contém erros de sintaxe; prosseguindo com recuperação parcial da árvore\n", relPath)
 	}
 
 	result := &ASTParseResult{}
