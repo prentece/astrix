@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -20,10 +21,13 @@ type StatusOutput struct {
 	CurrentContext *ContextStatus  `json:"current_context,omitempty"`
 }
 
-// MCPServerStatus detalha o status do processo MCP em execução.
+// MCPServerStatus detalha o status dos processos MCP em execução.
 type MCPServerStatus struct {
-	Online bool `json:"online"`
-	PID    int  `json:"pid,omitempty"`
+	Online         bool  `json:"online"`
+	PID            int   `json:"pid,omitempty"`
+	InstancesCount int   `json:"instances_count,omitempty"`
+	LeaderPID      int   `json:"leader_pid,omitempty"`
+	ReplicaPIDs    []int `json:"replica_pids,omitempty"`
 }
 
 // ContextStatus descreve o contexto do projeto atual na raiz.
@@ -55,7 +59,26 @@ func PrintStatus(projService *service.ProjectService, isJSON ...bool) error {
 
 	dbPath, _ := GetDatabasePath()
 	logPath, _ := GetLogPath()
-	pid, isAlive := ReadPID()
+
+	activePIDs, _ := ListActivePIDs()
+	leaderPID, isLeaderAlive := ReadPID()
+
+	allPIDsMap := make(map[int]bool)
+	for _, p := range activePIDs {
+		allPIDsMap[p] = true
+	}
+	if isLeaderAlive && leaderPID > 0 && !allPIDsMap[leaderPID] {
+		activePIDs = append(activePIDs, leaderPID)
+		allPIDsMap[leaderPID] = true
+	}
+
+	var replicaPIDs []int
+	for _, p := range activePIDs {
+		if p != leaderPID {
+			replicaPIDs = append(replicaPIDs, p)
+		}
+	}
+	isOnline := isLeaderAlive || len(activePIDs) > 0
 
 	currDir, _ := os.Getwd()
 	ctx, _ := DetectContext(currDir, projService.ProjectRepo())
@@ -66,8 +89,11 @@ func PrintStatus(projService *service.ProjectService, isJSON ...bool) error {
 			LogPath:       logPath,
 			ProjectsCount: len(projects),
 			MCPServer: MCPServerStatus{
-				Online: isAlive,
-				PID:    pid,
+				Online:         isOnline,
+				PID:            leaderPID,
+				InstancesCount: len(activePIDs),
+				LeaderPID:      leaderPID,
+				ReplicaPIDs:    replicaPIDs,
 			},
 		}
 		if ctx != nil && ctx.IsRegistered {
@@ -90,9 +116,24 @@ func PrintStatus(projService *service.ProjectService, isJSON ...bool) error {
 	fmt.Println(ui.KeyValue("Arquivo de Logs", logPath))
 	fmt.Println(ui.KeyValue("Projetos Cadastrados", strconv.Itoa(len(projects))))
 
-	// Checagem de processo via PID
-	if isAlive {
-		online := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorSuccess).Render(fmt.Sprintf("[ONLINE PID %d]", pid))
+	// Checagem de processo via PID e Líder
+	if isOnline {
+		var statusText string
+		if len(activePIDs) <= 1 {
+			targetPID := leaderPID
+			if targetPID == 0 && len(activePIDs) > 0 {
+				targetPID = activePIDs[0]
+			}
+			statusText = fmt.Sprintf("[ONLINE PID %d (Líder / Watcher)]", targetPID)
+		} else {
+			var replicaStr []string
+			for _, r := range replicaPIDs {
+				replicaStr = append(replicaStr, fmt.Sprintf("PID %d", r))
+			}
+			statusText = fmt.Sprintf("[ONLINE %d instâncias — Líder: PID %d (Watcher), Réplicas: %s]",
+				len(activePIDs), leaderPID, strings.Join(replicaStr, ", "))
+		}
+		online := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorSuccess).Render(statusText)
 		fmt.Println(ui.KeyValue("Servidor MCP", online))
 	} else {
 		standby := lipgloss.NewStyle().Foreground(ui.ColorMuted).Render("[STANDBY]")

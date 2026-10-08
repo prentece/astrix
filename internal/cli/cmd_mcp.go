@@ -25,7 +25,11 @@ func RunMCPCommand(
 
 	switch subCmd {
 	case "serve":
-		return RunServe(projectService, codeService, fileWatcher)
+		if err := RunServe(projectService, codeService, fileWatcher); err != nil {
+			fmt.Fprintf(os.Stderr, "Erro no servidor MCP: %v\n", err)
+			return err
+		}
+		return nil
 	case "config":
 		return PrintMCPConfigWithArgs(args[1:])
 	case "help", "--help", "-h":

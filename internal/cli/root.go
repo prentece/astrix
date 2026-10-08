@@ -135,12 +135,23 @@ func Execute() error {
 	case "status":
 		return handleErr(RunStatus(projectService, args[1:]...))
 	case "serve", "server":
-		return handleErr(RunServe(projectService, codeService, fileWatcher))
+		if err := RunServe(projectService, codeService, fileWatcher); err != nil {
+			fmt.Fprintf(os.Stderr, "Erro no servidor MCP: %v\n", err)
+			return err
+		}
+		return nil
 	case "watch":
 		return handleErr(RunWatch(projectService, codeService, fileWatcher, args[1:]...))
 	case "config":
 		return handleErr(PrintMCPConfigWithArgs(args[1:]))
 	case "mcp":
+		if len(args) <= 1 || args[1] == "serve" {
+			if err := RunMCPCommand(args[1:], projectService, codeService, fileWatcher); err != nil {
+				fmt.Fprintf(os.Stderr, "Erro no servidor MCP: %v\n", err)
+				return err
+			}
+			return nil
+		}
 		return handleErr(RunMCPCommand(args[1:], projectService, codeService, fileWatcher))
 	case "index", "reindex", "rebuild":
 		return handleErr(RunIndex(projectService))
