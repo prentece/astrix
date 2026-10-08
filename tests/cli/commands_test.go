@@ -35,7 +35,9 @@ func captureOutput(f func()) string {
 }
 
 func setupTestCLI(t *testing.T) (*service.ProjectService, *storage.ProjectRepo, *storage.DB) {
-	tempDB := filepath.Join(t.TempDir(), "cli_test.db")
+	tempHome := t.TempDir()
+	t.Setenv("ASTRIX_HOME", tempHome)
+	tempDB := filepath.Join(tempHome, "cli_test.db")
 	database, err := storage.NewDatabase(tempDB)
 	require.NoError(t, err)
 
