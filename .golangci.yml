@@ -21,3 +21,12 @@ linters:
     - staticcheck
     - unused
     - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: blank-imports
+          disabled: true
