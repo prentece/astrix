@@ -88,6 +88,23 @@ The File Watcher architecture SHALL support running both embedded within the MCP
 
 ---
 
+### Requirement: Single-Leader Watcher Coordination and Multi-Instance Failover
+The File Watcher SHALL coordinate leadership via operating system file locks (`watcher.lock`), ensuring that only one process executes active `fsnotify` file watching even when multiple MCP server instances or terminal sessions are running concurrently.
+
+#### Scenario: Multiple MCP editor windows run simultaneously
+- **GIVEN** a first MCP instance is running and holds the `watcher.lock` (acting as Leader)
+- **WHEN** additional MCP instances are launched (e.g. secondary editor windows)
+- **THEN** secondary instances SHALL operate as replicas, serving MCP queries without starting a concurrent `fsnotify` watcher
+- **AND** secondary instances SHALL poll the lock in the background
+
+#### Scenario: Active Leader process closes or terminates
+- **GIVEN** the Leader MCP process is closed or terminated
+- **WHEN** the OS kernel releases the `watcher.lock`
+- **THEN** a secondary replica instance SHALL acquire the lock within 2 seconds
+- **AND** it SHALL automatically promote itself to Leader and start `FileWatcherService` without user intervention
+
+---
+
 ### Requirement: Restartable Lifecycle
 The `FileWatcherService` SHALL support repeated `Start()` and `Stop()` cycles within the same process without errors, dynamically allocating a new OS watcher and context upon each restart.
 
