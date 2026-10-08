@@ -366,7 +366,9 @@ func (c *GoLanguageConfig) ExtractDigest(relPath string, content []byte, rootNod
 	}
 
 	var sb strings.Builder
-	sb.WriteString("// File: " + relPath + "\n")
+	sb.WriteString("// File: ")
+	sb.WriteString(relPath)
+	sb.WriteString("\n")
 
 	for i := 0; i < int(rootNode.ChildCount()); i++ {
 		child := rootNode.Child(i)
@@ -376,11 +378,14 @@ func (c *GoLanguageConfig) ExtractDigest(relPath string, content []byte, rootNod
 
 		switch child.Type() {
 		case "package_clause":
-			sb.WriteString(child.Content(content) + "\n\n")
+			sb.WriteString(child.Content(content))
+			sb.WriteString("\n\n")
 		case "import_declaration":
-			sb.WriteString(child.Content(content) + "\n\n")
+			sb.WriteString(child.Content(content))
+			sb.WriteString("\n\n")
 		case "type_declaration":
-			sb.WriteString(child.Content(content) + "\n\n")
+			sb.WriteString(child.Content(content))
+			sb.WriteString("\n\n")
 		case "function_declaration":
 			nameNode := child.ChildByFieldName("name")
 			paramsNode := child.ChildByFieldName("parameters")

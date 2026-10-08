@@ -430,7 +430,9 @@ func (c *PythonLanguageConfig) ExtractDigest(relPath string, content []byte, roo
 	}
 
 	var sb strings.Builder
-	sb.WriteString("# File: " + relPath + "\n")
+	sb.WriteString("# File: ")
+	sb.WriteString(relPath)
+	sb.WriteString("\n")
 
 	for i := 0; i < int(rootNode.ChildCount()); i++ {
 		child := rootNode.Child(i)
@@ -440,7 +442,8 @@ func (c *PythonLanguageConfig) ExtractDigest(relPath string, content []byte, roo
 
 		switch child.Type() {
 		case "import_statement", "import_from_statement":
-			sb.WriteString(child.Content(content) + "\n\n")
+			sb.WriteString(child.Content(content))
+			sb.WriteString("\n\n")
 		case "class_definition":
 			nameNode := child.ChildByFieldName("name")
 			superNode := child.ChildByFieldName("superclasses")
