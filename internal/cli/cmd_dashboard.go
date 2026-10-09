@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
+	"time"
 )
 
 // RunDashboard exibe as informações do projeto e apresenta um menu interativo de ações.
@@ -107,7 +108,7 @@ func RunDashboard(
 			fmt.Print(ui.ErrorBox(actionErr.Error(), ""))
 		}
 
-		if actionErr == nil {
+		if actionErr == nil && selectedAction != "watch" {
 			waitForReturn()
 		}
 	}
@@ -181,7 +182,9 @@ func RunGlobalDashboard(
 			fmt.Print(ui.ErrorBox(actionErr.Error(), ""))
 		}
 
-		waitForReturn()
+		if selectedAction != "watch" {
+			waitForReturn()
+		}
 	}
 }
 
@@ -193,13 +196,25 @@ func waitForReturn() {
 	fmt.Println()
 	fmt.Printf("%s %s  %s  %s %s\n", keyStyle.Render("enter"), descStyle.Render("voltar"), sepStyle.Render("•"), keyStyle.Render("esc"), descStyle.Render("voltar"))
 
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err == nil {
-		defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
 		var buf [1]byte
 		_, _ = os.Stdin.Read(buf[:])
 		return
 	}
-	var buf [1]byte
+
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		var buf [1]byte
+		_, _ = os.Stdin.Read(buf[:])
+		return
+	}
+	defer func() {
+		_ = term.Restore(fd, oldState)
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+
+	var buf [3]byte
 	_, _ = os.Stdin.Read(buf[:])
 }

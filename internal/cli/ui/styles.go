@@ -45,14 +45,22 @@ func ClearScreen() {
 	fmt.Print("\033[H\033[2J")
 }
 
+var inAltScreen bool
+
 // EnterAltScreen ativa o buffer alternativo do terminal para evitar poluir o histórico de comandos.
 func EnterAltScreen() {
-	fmt.Print("\033[?1049h\033[H")
+	if !inAltScreen {
+		fmt.Print("\033[?1049h\033[H")
+		inAltScreen = true
+	}
 }
 
-// ExitAltScreen desativa o buffer alternativo e restaura a tela original do terminal.
+// ExitAltScreen desativa o buffer alternativo e restaura a tela original do terminal apenas se estiver ativo.
 func ExitAltScreen() {
-	fmt.Print("\033[?1049l")
+	if inAltScreen {
+		fmt.Print("\033[?1049l\033[?25h\033[0m")
+		inAltScreen = false
+	}
 }
 
 // Banner renderiza o cabeçalho minimalista do Astrix.
