@@ -1,6 +1,6 @@
 {
   "name": "@prentece/astrix",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Astrix - Fast Code Intelligence & AST Engine for AI Coding Agents",
   "bin": {
     "astrix": "bin/astrix.js"
@@ -26,11 +26,11 @@
   "author": "prentece",
   "license": "MIT",
   "optionalDependencies": {
-    "@prentece/astrix-darwin-arm64": "0.2.1",
-    "@prentece/astrix-darwin-x64": "0.2.1",
-    "@prentece/astrix-linux-arm64": "0.2.1",
-    "@prentece/astrix-linux-x64": "0.2.1",
-    "@prentece/astrix-win32-x64": "0.2.1"
+    "@prentece/astrix-darwin-arm64": "0.2.2",
+    "@prentece/astrix-darwin-x64": "0.2.2",
+    "@prentece/astrix-linux-arm64": "0.2.2",
+    "@prentece/astrix-linux-x64": "0.2.2",
+    "@prentece/astrix-win32-x64": "0.2.2"
   },
   "engines": {
     "node": ">=16"
