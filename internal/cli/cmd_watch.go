@@ -83,6 +83,7 @@ func runPassiveWatch(_ *ProjectContext, mcpPID int, sigCh <-chan os.Signal) erro
 		case <-sigCh:
 			fmt.Println()
 			fmt.Println(ui.SuccessBox("Monitor passivo encerrado", "Servidor MCP permanece ativo em background."))
+			time.Sleep(100 * time.Millisecond)
 			return nil
 
 		case <-ticker.C:
@@ -150,6 +151,7 @@ func runActiveWatch(
 	<-sigCh
 	fmt.Println()
 	fmt.Println(ui.SuccessBox("Monitor ativo encerrado", "Recursos e watches liberados com sucesso."))
+	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
