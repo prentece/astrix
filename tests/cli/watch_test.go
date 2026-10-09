@@ -20,6 +20,7 @@ import (
 func setupTestWatchEnv(t *testing.T) (*service.ProjectService, *service.CodeService, *watcher.FileWatcherService, *storage.DB, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
+	t.Setenv("ASTRIX_HOME", tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	database, err := storage.NewDatabase(dbPath)

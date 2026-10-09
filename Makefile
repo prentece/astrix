@@ -12,7 +12,7 @@ help:
 	@echo "  make tidy        - Executa go mod tidy"
 	@echo "  make clean       - Remove binários temporários"
 
-VERSION ?= 0.1.0
+VERSION ?= 0.2.1
 LDFLAGS := -s -w -X 'astrix/internal/cli.Version=$(VERSION)'
 
 build:

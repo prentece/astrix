@@ -190,7 +190,8 @@ func queryCSV(absPath, query string) (string, error) {
 			return fmt.Sprintf("[Not Found] Coluna '%s' não encontrada no CSV", colName), nil
 		}
 
-		sb.WriteString(strings.Join(header, ",") + "\n")
+		sb.WriteString(strings.Join(header, ","))
+		sb.WriteString("\n")
 		matched := 0
 		for {
 			row, err := reader.Read()
@@ -198,7 +199,8 @@ func queryCSV(absPath, query string) (string, error) {
 				break
 			}
 			if colIdx < len(row) && strings.EqualFold(strings.TrimSpace(row[colIdx]), targetVal) {
-				sb.WriteString(strings.Join(row, ",") + "\n")
+				sb.WriteString(strings.Join(row, ","))
+				sb.WriteString("\n")
 				matched++
 				if matched >= maxRows {
 					fmt.Fprintf(&sb, "[... truncado em %d linhas]\n", maxRows)
@@ -234,7 +236,8 @@ func queryCSV(absPath, query string) (string, error) {
 			return fmt.Sprintf("[Not Found] Nenhuma das colunas '%s' foi encontrada", colsQuery), nil
 		}
 
-		sb.WriteString(strings.Join(matchedHeaders, ",") + "\n")
+		sb.WriteString(strings.Join(matchedHeaders, ","))
+		sb.WriteString("\n")
 		count := 0
 		for {
 			row, err := reader.Read()
@@ -249,7 +252,8 @@ func queryCSV(absPath, query string) (string, error) {
 					rowSubset = append(rowSubset, "")
 				}
 			}
-			sb.WriteString(strings.Join(rowSubset, ",") + "\n")
+			sb.WriteString(strings.Join(rowSubset, ","))
+			sb.WriteString("\n")
 			count++
 			if count >= maxRows {
 				fmt.Fprintf(&sb, "[... truncado em %d linhas]\n", maxRows)
@@ -270,7 +274,8 @@ func queryCSV(absPath, query string) (string, error) {
 	}
 
 	if colIdx != -1 {
-		sb.WriteString(header[colIdx] + "\n")
+		sb.WriteString(header[colIdx])
+		sb.WriteString("\n")
 		count := 0
 		for {
 			row, err := reader.Read()
@@ -278,7 +283,8 @@ func queryCSV(absPath, query string) (string, error) {
 				break
 			}
 			if colIdx < len(row) {
-				sb.WriteString(row[colIdx] + "\n")
+				sb.WriteString(row[colIdx])
+				sb.WriteString("\n")
 				count++
 				if count >= maxRows {
 					fmt.Fprintf(&sb, "[... truncado em %d linhas]\n", maxRows)
@@ -290,7 +296,8 @@ func queryCSV(absPath, query string) (string, error) {
 	}
 
 	// Caso 4: Busca por palavra-chave em qualquer coluna
-	sb.WriteString(strings.Join(header, ",") + "\n")
+	sb.WriteString(strings.Join(header, ","))
+	sb.WriteString("\n")
 	matched := 0
 	for {
 		row, err := reader.Read()
@@ -299,7 +306,8 @@ func queryCSV(absPath, query string) (string, error) {
 		}
 		rowStr := strings.Join(row, " ")
 		if strings.Contains(strings.ToLower(rowStr), strings.ToLower(query)) {
-			sb.WriteString(strings.Join(row, ",") + "\n")
+			sb.WriteString(strings.Join(row, ","))
+			sb.WriteString("\n")
 			matched++
 			if matched >= maxRows {
 				fmt.Fprintf(&sb, "[... truncado em %d linhas]\n", maxRows)

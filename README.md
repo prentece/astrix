@@ -20,7 +20,7 @@
 
 - 🌳 **Polyglot AST Indexing** — Parses Go, TypeScript/JavaScript, Python, Java, and PHP via Tree-sitter
 - ⚡ **Incremental Delta Indexing** — Two-Tier Hash evaluation (mtime/size fast check + SHA-256 digest) with atomic SQLite transactions skips unchanged files
-- 📡 **MCP Server (STDIO)** — Native JSON-RPC 2.0 transport, zero port conflicts, client-managed lifecycle
+- 📡 **MCP Server (STDIO)** — Native JSON-RPC 2.0 transport, zero port conflicts, multi-window concurrent support with automated Watcher leader election and failover
 - 🔍 **Symbol Lookup** — Find function/class definitions and all their reference sites across the codebase
 - 📐 **Architectural Centrality** — PageRank-based dependency graph highlights architectural core nodes ("God Nodes")
 - 👁️ **Real-Time File Watcher** — Debounced fsnotify watcher with dual execution modes (active standalone or zero-contention passive stream)
@@ -153,6 +153,14 @@ Or using `npx` directly without global installation:
   }
 }
 ```
+
+#### Multi-Window Support & Watcher Failover
+
+Astrix natively supports multiple concurrent editor windows (e.g., multiple Antigravity, Cursor, or VS Code windows open at the same time):
+
+- **Concurrent MCP Execution** — All windows connect and execute MCP tools concurrently via their dedicated STDIO channels.
+- **Single Watcher Leader** — Astrix elects a single instance to run the `fsnotify` file watcher via an OS file lock, preventing redundant indexing and CPU/disk thrashing.
+- **Automated Failover** — If the Leader window is closed, a secondary replica window automatically promotes itself to Leader within 2 seconds and resumes file watching with zero user intervention.
 
 ## 🔧 MCP Tools Reference
 

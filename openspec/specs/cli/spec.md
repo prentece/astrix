@@ -55,7 +55,9 @@ All terminal output from standalone commands SHALL start at column 0 with standa
 #### Scenario: Inspecting system status
 - **GIVEN** Astrix is initialized
 - **WHEN** the user executes `astrix status`
-- **THEN** the output SHALL render `Base de Dados`, `Arquivo de Logs`, `Projetos Cadastrados`, `Servidor MCP`, and `Contexto Atual` starting at column 0 with `[STANDBY]` status for MCP
+- **THEN** the output SHALL render `Base de Dados`, `Arquivo de Logs`, `Projetos Cadastrados`, `Servidor MCP`, and `Contexto Atual` starting at column 0
+- **AND** `Servidor MCP` SHALL indicate active instances, identifying the Leader PID (active Watcher) and any secondary Replicas, or `[STANDBY]` when offline
+- **AND** when `--json` is provided, the payload SHALL include `instances_count`, `leader_pid`, and `replica_pids`
 
 ---
 

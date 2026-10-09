@@ -366,7 +366,9 @@ func (c *JavaLanguageConfig) ExtractDigest(relPath string, content []byte, rootN
 	}
 
 	var sb strings.Builder
-	sb.WriteString("// File: " + relPath + "\n")
+	sb.WriteString("// File: ")
+	sb.WriteString(relPath)
+	sb.WriteString("\n")
 
 	for i := 0; i < int(rootNode.ChildCount()); i++ {
 		child := rootNode.Child(i)
@@ -376,7 +378,8 @@ func (c *JavaLanguageConfig) ExtractDigest(relPath string, content []byte, rootN
 
 		switch child.Type() {
 		case "package_declaration", "import_declaration":
-			sb.WriteString(child.Content(content) + "\n\n")
+			sb.WriteString(child.Content(content))
+			sb.WriteString("\n\n")
 		case "class_declaration", "interface_declaration", "record_declaration", "enum_declaration":
 			nameNode := child.ChildByFieldName("name")
 			className := ""
@@ -392,7 +395,11 @@ func (c *JavaLanguageConfig) ExtractDigest(relPath string, content []byte, rootN
 				kind = "enum"
 			}
 
-			sb.WriteString("public " + kind + " " + className + " {\n")
+			sb.WriteString("public ")
+			sb.WriteString(kind)
+			sb.WriteString(" ")
+			sb.WriteString(className)
+			sb.WriteString(" {\n")
 
 			body := child.ChildByFieldName("body")
 			if body != nil {
@@ -421,7 +428,9 @@ func (c *JavaLanguageConfig) ExtractDigest(relPath string, content []byte, rootN
 							sb.WriteString(sig)
 						}
 					case "field_declaration":
-						sb.WriteString("    " + m.Content(content) + "\n")
+						sb.WriteString("    ")
+						sb.WriteString(m.Content(content))
+						sb.WriteString("\n")
 					}
 				}
 			}

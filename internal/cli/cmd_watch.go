@@ -134,6 +134,14 @@ func runActiveWatch(
 		log.SetOutput(origWriter)
 	}()
 
+	lockPath, _ := GetWatcherLockPath()
+	watcherLock := NewWatcherLock(lockPath)
+	if lockPath != "" {
+		if acquired, err := watcherLock.TryAcquire(); err == nil && acquired {
+			defer watcherLock.Release()
+		}
+	}
+
 	if err := fileWatcher.Start(); err != nil {
 		return fmt.Errorf("falha ao iniciar monitor de arquivos: %w", err)
 	}

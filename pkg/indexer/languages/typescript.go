@@ -733,7 +733,9 @@ func extractJSTSDigest(relPath string, content []byte, rootNode *sitter.Node) st
 	}
 
 	var sb strings.Builder
-	sb.WriteString("// File: " + relPath + "\n")
+	sb.WriteString("// File: ")
+	sb.WriteString(relPath)
+	sb.WriteString("\n")
 
 	for i := 0; i < int(rootNode.ChildCount()); i++ {
 		child := rootNode.Child(i)
@@ -749,7 +751,8 @@ func extractJSTSDigest(relPath string, content []byte, rootNode *sitter.Node) st
 			if decl != nil {
 				target = decl
 			} else {
-				sb.WriteString(child.Content(content) + "\n\n")
+				sb.WriteString(child.Content(content))
+				sb.WriteString("\n\n")
 				continue
 			}
 		}
@@ -761,9 +764,12 @@ func extractJSTSDigest(relPath string, content []byte, rootNode *sitter.Node) st
 
 		switch target.Type() {
 		case "import_statement":
-			sb.WriteString(target.Content(content) + "\n\n")
+			sb.WriteString(target.Content(content))
+			sb.WriteString("\n\n")
 		case "interface_declaration", "type_alias_declaration":
-			sb.WriteString(prefix + target.Content(content) + "\n\n")
+			sb.WriteString(prefix)
+			sb.WriteString(target.Content(content))
+			sb.WriteString("\n\n")
 		case "class_declaration":
 			nameNode := target.ChildByFieldName("name")
 			heritage := FindChildByType(target, "class_heritage")
@@ -809,7 +815,9 @@ func extractJSTSDigest(relPath string, content []byte, rootNode *sitter.Node) st
 							sb.WriteString(mSig)
 						}
 					case "public_field_definition", "field_definition":
-						sb.WriteString("  " + m.Content(content) + "\n")
+						sb.WriteString("  ")
+						sb.WriteString(m.Content(content))
+						sb.WriteString("\n")
 					}
 				}
 			}

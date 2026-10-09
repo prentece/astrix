@@ -400,7 +400,9 @@ func (c *PhpLanguageConfig) ExtractDigest(relPath string, content []byte, rootNo
 	}
 
 	var sb strings.Builder
-	sb.WriteString("<?php\n// File: " + relPath + "\n")
+	sb.WriteString("<?php\n// File: ")
+	sb.WriteString(relPath)
+	sb.WriteString("\n")
 
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {
@@ -410,7 +412,8 @@ func (c *PhpLanguageConfig) ExtractDigest(relPath string, content []byte, rootNo
 
 		switch n.Type() {
 		case "namespace_definition", "use_declaration":
-			sb.WriteString(n.Content(content) + "\n\n")
+			sb.WriteString(n.Content(content))
+			sb.WriteString("\n\n")
 		case "class_declaration", "interface_declaration", "trait_declaration", "enum_declaration":
 			nameNode := n.ChildByFieldName("name")
 			className := ""
@@ -426,7 +429,10 @@ func (c *PhpLanguageConfig) ExtractDigest(relPath string, content []byte, rootNo
 				kind = "enum"
 			}
 
-			sb.WriteString(kind + " " + className + " {\n")
+			sb.WriteString(kind)
+			sb.WriteString(" ")
+			sb.WriteString(className)
+			sb.WriteString(" {\n")
 
 			body := n.ChildByFieldName("body")
 			if body == nil {
@@ -460,7 +466,9 @@ func (c *PhpLanguageConfig) ExtractDigest(relPath string, content []byte, rootNo
 							sb.WriteString(sig)
 						}
 					case "property_declaration":
-						sb.WriteString("    " + m.Content(content) + "\n")
+						sb.WriteString("    ")
+						sb.WriteString(m.Content(content))
+						sb.WriteString("\n")
 					}
 				}
 			}

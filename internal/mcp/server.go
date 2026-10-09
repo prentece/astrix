@@ -23,7 +23,7 @@ func NewServer(
 	codeService *service.CodeService,
 	version ...string,
 ) *Server {
-	ver := "0.1.0"
+	ver := "0.2.1"
 	if len(version) > 0 && version[0] != "" {
 		ver = version[0]
 	}
