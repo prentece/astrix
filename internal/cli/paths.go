@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // GetAstrixHomeDir retorna o diretório global ~/.astrix do usuário no SO atual (Linux, macOS, Windows).
@@ -106,12 +105,7 @@ func IsProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// Em sistemas Unix, Signal(0) verifica se o processo existe sem enviar sinal destrutivo
-	return process.Signal(syscall.Signal(0)) == nil
+	return isProcessAliveOS(pid)
 }
 
 // ListActivePIDs retorna a lista ordenada de PIDs de instâncias ativas no sistema,

@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // WatcherLock gerencia a exclusividade do FileWatcher entre múltiplos processos MCP.
@@ -29,7 +27,7 @@ func (l *WatcherLock) IsHeld() bool {
 	return l.file != nil
 }
 
-// TryAcquire tenta obter o lock exclusivo de forma não-bloqueante no SO usando flock.
+// TryAcquire tenta obter o lock exclusivo de forma não-bloqueante no SO.
 // Retorna true se este processo se tornou o líder do watcher, false se outro processo já o detém.
 func (l *WatcherLock) TryAcquire() (bool, error) {
 	if l.file != nil {
@@ -46,13 +44,14 @@ func (l *WatcherLock) TryAcquire() (bool, error) {
 		return false, fmt.Errorf("falha ao abrir watcher.lock: %w", err)
 	}
 
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	acquired, err := lockFileOS(f)
 	if err != nil {
 		_ = f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			return false, nil
-		}
-		return false, fmt.Errorf("falha ao tentar adquirir lock do watcher: %w", err)
+		return false, err
+	}
+	if !acquired {
+		_ = f.Close()
+		return false, nil
 	}
 
 	_ = f.Truncate(0)
@@ -67,7 +66,7 @@ func (l *WatcherLock) TryAcquire() (bool, error) {
 // Release libera o lock e fecha o arquivo.
 func (l *WatcherLock) Release() {
 	if l.file != nil {
-		_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
+		unlockFileOS(l.file)
 		_ = l.file.Close()
 		l.file = nil
 	}
