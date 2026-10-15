@@ -46,7 +46,8 @@ func (s *ProjectService) ProjectRepo() storage.ProjectRepository {
 	return s.projectRepo
 }
 
-// ListAll retorna todos os projetos cadastrados.
+// ListAll retorna todos os projetos cadastrados, enriquecidos com a distribuição por linguagem.
+// O enriquecimento é best-effort: falhas no cálculo deixam Languages vazio e nunca derrubam a listagem.
 func (s *ProjectService) ListAll() ([]*storage.Project, error) {
 	projects, err := s.projectRepo.ListAll()
 	if err != nil {
@@ -54,6 +55,11 @@ func (s *ProjectService) ListAll() ([]*storage.Project, error) {
 	}
 	if projects == nil {
 		return []*storage.Project{}, nil
+	}
+	for _, p := range projects {
+		if shares, err := s.engine.ProjectLanguageShares(p.ID); err == nil {
+			p.Languages = shares
+		}
 	}
 	return projects, nil
 }

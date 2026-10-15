@@ -13,7 +13,7 @@ import (
 func registerProjectTools(s *server.MCPServer, projectService *service.ProjectService, codeService *service.CodeService) {
 	// Tool: list_projects
 	listProjectsTool := mcp.NewTool("list_projects",
-		mcp.WithDescription("Discover all registered repositories in the Astrix catalog and their 'project_id', name, language and path."),
+		mcp.WithDescription("Discover all registered repositories in the Astrix catalog and their 'project_id', name, language breakdown and path. The breakdown is the percentage of each language by bytes of indexed files: text shows the top 3 plus 'other' (e.g. 'go 84.0%, python 10.0%, java 6.0%'); json returns 'languages' ([{name, percent}]) and 'primary_language'. The 'language' field is DEPRECATED and only mirrors 'primary_language'; use 'languages' instead."),
 		mcp.WithString("format", mcp.Description("Output format: 'text' (default tabular ASCII) or 'json'.")),
 	)
 	s.AddTool(listProjectsTool, safeToolHandler(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

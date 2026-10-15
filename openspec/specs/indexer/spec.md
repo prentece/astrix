@@ -143,3 +143,20 @@ All components requiring language detection SHALL derive the language from the c
 - **GIVEN** a file with a supported language extension (e.g. `.go`, `.ts`, `.py`, `.java`, `.php`)
 - **WHEN** language detection is performed
 - **THEN** it SHALL resolve directly from the registered `LanguageConfig`
+
+---
+
+### Requirement: Project Language Distribution
+The Indexer SHALL compute a project's language distribution on read from the persisted file states (`project_file_states.filepath` and `file_size`), without persisting derived data or requiring a schema change.
+
+#### Scenario: Distribution by bytes
+- **GIVEN** a project with indexed files whose languages are resolved by extension through the language registry
+- **WHEN** the distribution is computed
+- **THEN** each language's percentage SHALL be its share of the total bytes of the indexed files, rounded to one decimal place
+- **AND** results SHALL be ordered by largest share first, with ties broken by language name
+
+#### Scenario: Invalid or missing input
+- **GIVEN** nil entries, files with `file_size <= 0`, an empty set, or an engine without a file state repository
+- **WHEN** the distribution is computed
+- **THEN** those entries SHALL be ignored and an empty distribution SHALL be returned without error
+

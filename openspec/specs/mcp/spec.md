@@ -17,12 +17,30 @@ The MCP server SHALL communicate via standard input/output (STDIO) using the JSO
 ---
 
 ### Requirement: Project Catalog Inspection
-The MCP server SHALL provide the `list_projects` tool to return all repositories registered in the Astrix database.
+The MCP server SHALL provide the `list_projects` tool to return all repositories registered in the Astrix database, including the percentage of each language by bytes of indexed files.
 
 #### Scenario: Client queries available projects
 - **GIVEN** the client calls `list_projects` with empty arguments
 - **WHEN** the server processes the request
-- **THEN** it SHALL return a structured list of all projects including `id`, `name`, `path`, `language`, `status`, `file_count`, and `symbol_count`
+- **THEN** it SHALL return a list of all projects including `id`, `name`, `path`, `status`, `file_count`, `symbol_count`, and the language breakdown
+
+#### Scenario: Text output shows the language breakdown
+- **GIVEN** a project whose indexed files are 84% Go, 10% Python and 6% Java by bytes
+- **WHEN** `list_projects` is called with the default `text` format
+- **THEN** the LANGUAGE column SHALL list up to the 3 largest languages with one decimal place, e.g. `go 84.0%, python 10.0%, java 6.0%`
+- **AND** any remaining languages SHALL be grouped into a single `other` entry
+
+#### Scenario: JSON output exposes languages
+- **GIVEN** the client calls `list_projects` with `format = "json"`
+- **WHEN** the project has a language distribution
+- **THEN** each project SHALL include `languages` as a list of `{name, percent}` ordered by largest share first (ties by name) and `primary_language` with the largest language
+- **AND** the deprecated `language` field SHALL remain present with the same value as `primary_language`
+
+#### Scenario: Project without distribution
+- **GIVEN** a project with no indexed files, or whose distribution could not be computed
+- **WHEN** `list_projects` is called
+- **THEN** the call SHALL still succeed
+- **AND** `language`, `primary_language` and the text column SHALL fall back to the project's registered language, and `languages` SHALL be omitted
 
 ---
 
