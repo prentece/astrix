@@ -167,6 +167,9 @@ func (r *DataModelRepo) ListByProject(projectID string) ([]*DataModel, error) {
 		}
 		result = append(result, &m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return result, nil
 }
@@ -219,6 +222,9 @@ func (r *DataModelRepo) ListDataModels(projectID string, limit, offset int) ([]*
 			_ = json.Unmarshal([]byte(fieldsJSON), &m.Fields)
 		}
 		result = append(result, &m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
 	}
 
 	hasMore := false

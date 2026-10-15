@@ -21,6 +21,7 @@ linters:
     - staticcheck
     - unused
     - revive
+    - rowserrcheck
   settings:
     revive:
       rules:

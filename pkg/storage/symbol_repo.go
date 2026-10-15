@@ -221,6 +221,9 @@ func (r *SymbolRepo) FindSymbol(projectID, symbolName string, limit, offset int)
 		s.Kind = SymbolKind(kindStr)
 		symbols = append(symbols, &s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
 
 	hasMore := false
 	if len(symbols) > limit {
@@ -310,6 +313,9 @@ func (r *SymbolRepo) FindReferences(projectID, symbolName string, limit, offset 
 		}
 		refs = append(refs, &ref)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
 
 	hasMore := false
 	if len(refs) > limit {
@@ -367,6 +373,9 @@ func (r *SymbolRepo) GetFileImportCounts(projectID string) (map[string]int, erro
 				counts[file] = count
 			}
 		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
 
 	return counts, nil
@@ -393,6 +402,9 @@ func (r *SymbolRepo) GetSymbolReferenceCounts(projectID string) (map[string]int,
 		if err := rows.Scan(&name, &count); err == nil && name != "" {
 			counts[name] = count
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return counts, nil
@@ -436,6 +448,9 @@ func (r *SymbolRepo) GetAllSymbolsForRanking(projectID string) ([]*Symbol, error
 		s.Kind = SymbolKind(kindStr)
 		symbols = append(symbols, &s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return symbols, nil
 }
@@ -469,6 +484,9 @@ func (r *SymbolRepo) GetSymbolsByFileAndLineRange(projectID, file string, startL
 		}
 		s.Kind = SymbolKind(kindStr)
 		symbols = append(symbols, &s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return symbols, nil
@@ -515,6 +533,9 @@ func (r *SymbolRepo) GetSymbolCountsByFile(projectID string) ([]*FileSymbolStats
 		}
 		stats = append(stats, &s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	// Fallback para projetos indexados sem registro prévio em project_file_states
 	if len(stats) == 0 {
@@ -550,6 +571,9 @@ func (r *SymbolRepo) GetSymbolCountsByFile(projectID string) ([]*FileSymbolStats
 				s.Status = "empty"
 			}
 			stats = append(stats, &s)
+		}
+		if err := legRows.Err(); err != nil {
+			return nil, err
 		}
 	}
 
