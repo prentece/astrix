@@ -6,7 +6,7 @@ Coordinates the multi-language Abstract Syntax Tree (AST) parsing, symbol extrac
 ## Requirements
 
 ### Requirement: Polyglot Tree-sitter AST Parsing
-The Indexer Engine SHALL parse source code files across supported programming languages (Go, TypeScript/JavaScript, Python, Java, PHP) into concrete AST representations, mapping capture roles (`<kind>.name`, `<kind>.def`, and optional `<kind>.parent`) to semantic `SymbolKind` values (`function`, `method`, `class`, `struct`, `interface`, `type`, `constant`, `variable`, `enum`, `trait`, `field`, `namespace`, `import`), linking nested members to their innermost enclosing container as `Parent`, and deduplicating symbols by `(file, name, parent)` while prioritizing more specific symbol kinds on identical byte spans.
+The Indexer Engine SHALL parse source code files across supported programming languages (Go, TypeScript, JavaScript, Python, Java, PHP, Rust, C#, Kotlin, and Ruby) into concrete AST representations, mapping capture roles (`<kind>.name`, `<kind>.def`, and optional `<kind>.parent`) to semantic `SymbolKind` values (`function`, `method`, `class`, `struct`, `interface`, `type`, `constant`, `variable`, `enum`, `trait`, `field`, `namespace`, `import`), linking nested members to their innermost enclosing container as `Parent`, and deduplicating symbols by `(file, name, parent)` while prioritizing more specific symbol kinds on identical byte spans.
 
 #### Scenario: Parsing a Go source file
 - **GIVEN** a Go file containing package declarations, functions, types (structs, interfaces, type aliases, generic types), struct fields, interface method elements, constants, variables, and methods (including value, pointer, and generic receivers)
@@ -23,6 +23,13 @@ The Indexer Engine SHALL parse source code files across supported programming la
 - **WHEN** the file is parsed by the respective language extractor
 - **THEN** the engine SHALL map `@record` to `class`, `@constructor` to `method`, `@trait` to `trait`, `@field` to `field`, and `@mod`/`@namespace` to `namespace`
 - **AND** the engine SHALL link nested members to their innermost enclosing container (`Parent`) and exclude Python function-local variable assignments from symbol extraction
+
+#### Scenario: Parsing a Rust, C#, Kotlin, or Ruby source file via BaseLanguageConfig
+- **GIVEN** a Rust (`.rs`), C# (`.cs`), Kotlin (`.kt`, `.kts`), or Ruby (`.rb`) file registered via `BaseLanguageConfig`
+- **WHEN** the file is parsed by the respective Tree-sitter grammar
+- **THEN** the engine SHALL extract symbols (modules/namespaces, structs, classes/objects/records, traits/interfaces, enums and variants/entries, functions, methods, fields/properties, constants, and type aliases), call expressions, local variables, and import sites
+- **AND** nested members and `impl` methods SHALL be linked to their enclosing container or target type as `Parent`
+
 
 ---
 

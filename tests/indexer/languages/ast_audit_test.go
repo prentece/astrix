@@ -56,6 +56,10 @@ var auditLangs = []auditLang{
 	{"python", []string{".py"}},
 	{"typescript", []string{".ts"}}, // .tsx usa outra gramática; fora do escopo da auditoria
 	{"javascript", []string{".js", ".mjs", ".cjs"}},
+	{"rust", []string{".rs"}},
+	{"csharp", []string{".cs"}},
+	{"kotlin", []string{".kt", ".kts"}},
+	{"ruby", []string{".rb"}},
 }
 
 type nodeKey struct {

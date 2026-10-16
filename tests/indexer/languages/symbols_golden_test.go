@@ -75,6 +75,39 @@ var symbolGolden = map[string][]string{
 		"method constructor Base", "method label Base", "method make Base", "field handle Base",
 		"function helper -", "function other -",
 	},
+	"rust": {
+		"namespace net -", "function connect net",
+		"constant MAX_CONN -", "constant VERSION -",
+		"type Result -",
+		"enum Status -", "constant Active Status", "constant Inactive Status",
+		"trait Runner -", "method run Runner",
+		"struct Server -", "field port Server", "field name Server",
+		"method new Server", "method start Server",
+		"function bootstrap -",
+	},
+	"csharp": {
+		"namespace App.Core -",
+		"enum Role App.Core", "constant Admin Role", "constant Guest Role",
+		"interface IRepository App.Core", "method Find IRepository",
+		"struct Coordinate App.Core", "field X Coordinate", "field Y Coordinate",
+		"class UserDto App.Core",
+		"class UserService App.Core", "field _prefix UserService", "field Count UserService",
+		"method UserService UserService", "method Find UserService", "method Format UserService",
+	},
+	"kotlin": {
+		"enum Mode -", "constant FAST Mode", "constant SAFE Mode",
+		"interface Worker -", "method execute Worker",
+		"class Config -", "field version Config", "method load Config",
+		"class Service -", "field name Service", "field retries Service", "method execute Service",
+		"function helper -",
+	},
+	"ruby": {
+		"namespace App -", "constant DEFAULT_TIMEOUT App",
+		"namespace Helpers App", "method format Helpers",
+		"class Client App", "constant MAX_RETRIES Client",
+		"method initialize Client", "method fetch Client", "method create Client",
+		"function top_helper -",
+	},
 }
 
 func extractFixtureSymbols(t *testing.T, lang string) []string {
@@ -114,3 +147,39 @@ func TestSymbolsGolden(t *testing.T) {
 		})
 	}
 }
+
+func TestNewLanguagesCallersAndImportSites(t *testing.T) {
+	expectedCallers := map[string][]string{
+		"rust":   {"connect", "new", "start"},
+		"csharp": {"Format"},
+		"kotlin": {"trim", "helper", "isNotEmpty"},
+		"ruby":   {"to_s", "format", "new"},
+	}
+
+	engine := indexer.NewEngine(nil, nil, nil, nil)
+	for lang, wantCallees := range expectedCallers {
+		t.Run(lang, func(t *testing.T) {
+			cfg, ok := indexer.GetConfigByName(lang)
+			require.True(t, ok)
+
+			matches, err := filepath.Glob(filepath.Join("testdata", "audit", lang, "*"))
+			require.NoError(t, err)
+			require.Len(t, matches, 1)
+
+			content, err := os.ReadFile(matches[0])
+			require.NoError(t, err)
+
+			res, err := engine.ExtractASTDataAndDigest("p", filepath.Base(matches[0]), content, cfg)
+			require.NoError(t, err)
+
+			seen := map[string]bool{}
+			for _, c := range res.Callers {
+				seen[c.SymbolName] = true
+			}
+			for _, callee := range wantCallees {
+				assert.True(t, seen[callee], "esperava chamada/referência a %q em %s, obteve %v", callee, lang, seen)
+			}
+		})
+	}
+}
+

@@ -583,8 +583,7 @@ func (s *ProjectService) BrowsePath(targetPath string) (*BrowseResponse, error) 
 			}
 			if subEntries, err := os.ReadDir(fullPath); err == nil {
 				for _, sub := range subEntries {
-					subExt := strings.ToLower(filepath.Ext(sub.Name()))
-					if subExt == ".go" || subExt == ".py" || subExt == ".ts" || subExt == ".js" || subExt == ".tsx" || subExt == ".jsx" || subExt == ".java" || subExt == ".php" {
+					if _, ok := indexer.GetConfigByFilePath(sub.Name()); ok {
 						hasCode = true
 						break
 					}

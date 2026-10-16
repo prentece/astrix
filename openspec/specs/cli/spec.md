@@ -62,13 +62,13 @@ All terminal output from standalone commands SHALL start at column 0 with standa
 ---
 
 ### Requirement: Multi-Agent Skills Generation
-The CLI SHALL generate tailored rule and skill definitions for multiple AI programming assistants.
+The CLI SHALL generate standard Agent Skills (`SKILL.md` with YAML frontmatter and `references/workflows.md`) and fallback instructions for multiple AI programming assistants.
 
 #### Scenario: Configuring skills for selected agents
-- **GIVEN** a registered project with ID `proj-xyz` and name `my-app`
-- **WHEN** the user selects agents (Antigravity, Cursor, Claude Code, GitHub Copilot) in `astrix skills`
-- **THEN** the system SHALL write the corresponding skill files in `.agents/skills/astrix/SKILL.md`, `.cursor/rules/astrix.mdc`, `.claude/skills/astrix/SKILL.md`, or `.github/copilot-instructions.md`
-- **AND** each generated file SHALL include the project ID and instructions for querying Astrix MCP
+- **GIVEN** a registered project
+- **WHEN** the user selects agents (Antigravity, Claude Code, Cursor, GitHub Copilot, Windsurf, OpenAI Codex, OpenCode, Cline, Roo Code, or Generic) in `astrix skills`
+- **THEN** the system SHALL write the corresponding skill packages in `.agents/skills/astrix/SKILL.md`, `.claude/skills/astrix/SKILL.md`, `.cursor/skills/astrix/SKILL.md`, `.github/skills/astrix/SKILL.md`, `.windsurf/skills/astrix/SKILL.md`, `.codex/skills/astrix/SKILL.md`, `.opencode/skills/astrix/SKILL.md`, `.cline/skills/astrix/SKILL.md`, `.roo/skills/astrix/SKILL.md` (each with `references/workflows.md`), or `ASTRIX.md` for Generic
+- **AND** each generated skill SHALL include instructions for resolving the project ID and querying Astrix MCP
 
 ---
 

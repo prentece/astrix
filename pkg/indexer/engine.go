@@ -142,10 +142,6 @@ var supplementalExtLanguages = map[string]string{
 	".dart":  "dart",
 	".ex":    "elixir",
 	".exs":   "elixir",
-	".kt":    "kotlin",
-	".rs":    "rust",
-	".rb":    "ruby",
-	".cs":    "csharp",
 	".cpp":   "cpp",
 	".c":     "c",
 	".h":     "c",
@@ -1126,20 +1122,24 @@ func isContainerKind(k storage.SymbolKind) bool {
 // (por exemplo, struct sobre type, function sobre const).
 func symbolKindRank(k storage.SymbolKind) int {
 	switch k {
-	case storage.KindClass, storage.KindStruct, storage.KindInterface, storage.KindEnum, storage.KindTrait:
+	case storage.KindStruct, storage.KindInterface, storage.KindEnum, storage.KindTrait:
+		return 7
+	case storage.KindClass:
 		return 6
 	case storage.KindNamespace:
 		return 5
-	case storage.KindFunction, storage.KindMethod:
+	case storage.KindMethod:
 		return 4
-	case storage.KindType:
+	case storage.KindFunction:
 		return 3
-	case storage.KindField:
+	case storage.KindType:
 		return 2
-	case storage.KindConstant:
+	case storage.KindField:
 		return 1
+	case storage.KindConstant:
+		return 0
 	}
-	return 0
+	return -1
 }
 
 // assignSymbolParents preenche Symbol.Parent com o nome do menor container (classe, struct,

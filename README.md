@@ -18,26 +18,47 @@
 
 ## ✨ Features
 
-- 🌳 **Polyglot AST Indexing** — Parses Go, TypeScript/JavaScript, Python, Java, and PHP via Tree-sitter
-- ⚡ **Incremental Delta Indexing** — Two-Tier Hash evaluation (mtime/size fast check + SHA-256 digest) with atomic SQLite transactions skips unchanged files
+- 🌳 **Polyglot AST Indexing** — Parses Go, TypeScript, JavaScript, Python, Java, PHP, Rust, C#, Kotlin, and Ruby via Tree-sitter
+- ⚡ **Incremental Delta Indexing** — Two-Tier Hash evaluation (mtime/size fast check + SHA-256 digest + query signature) with atomic SQLite transactions skips unchanged files
 - 📡 **MCP Server (STDIO)** — Native JSON-RPC 2.0 transport, zero port conflicts, multi-window concurrent support with automated Watcher leader election and failover
 - 🔍 **Symbol Lookup** — Find function/class definitions and all their reference sites across the codebase
 - 📐 **Architectural Centrality** — PageRank-based dependency graph highlights architectural core nodes ("God Nodes")
 - 👁️ **Real-Time File Watcher** — Debounced fsnotify watcher with dual execution modes (active standalone or zero-contention passive stream)
 - 🛡️ **Security Boundaries** — Path traversal protection and bounded line-slice validation built-in
-- 🤖 **Multi-Agent Skill Generation** — Generates configuration files for Antigravity, Cursor, Claude Code, and GitHub Copilot
+- 🤖 **Multi-Agent Skill Generation** — Generates standard Agent Skills (`SKILL.md` + `references/workflows.md`) for Antigravity, Claude Code, Cursor, GitHub Copilot, Windsurf, OpenAI Codex, OpenCode, Cline, and Roo Code
 - 🖥️ **Interactive TUI** — Context-aware terminal UI powered by Bubble Tea and Lip Gloss
+
+## 🌐 Supported Languages & Tiers
+
+| Language | Extensions | Tier | Symbols (T1) | Callers & Variables (T2) | Import Sites & Graph (T3) | AST Digest & Data Models (T4) |
+|---|---|---|---|---|---|---|
+| **Go** | `.go` | **T4** | ✅ | ✅ | ✅ | ✅ |
+| **TypeScript** | `.ts`, `.tsx` | **T4** | ✅ | ✅ | ✅ | ✅ |
+| **JavaScript** | `.js`, `.jsx`, `.mjs`, `.cjs` | **T4** | ✅ | ✅ | ✅ | ✅ |
+| **Python** | `.py` | **T4** | ✅ | ✅ | ✅ | ✅ |
+| **Java** | `.java` | **T4** | ✅ | ✅ | ✅ | ✅ |
+| **PHP** | `.php` | **T4** | ✅ | ✅ | ✅ | ✅ |
+| **Rust** | `.rs` | **T3** | ✅ | ✅ | ✅ (Import Sites) | — |
+| **C#** | `.cs` | **T3** | ✅ | ✅ | ✅ (Import Sites) | — |
+| **Kotlin** | `.kt`, `.kts` | **T3** | ✅ | ✅ | ✅ (Import Sites) | — |
+| **Ruby** | `.rb` | **T3** | ✅ | ✅ | ✅ (Import Sites) | — |
 
 ## 🤖 Supported AI Assistants
 
-Astrix integrates as an MCP server with:
+Astrix integrates as an MCP server and generates [Agent Skills (`agentskills.io`)](https://agentskills.io) with on-demand `references/workflows.md` for:
 
-| Assistant | Config file generated |
+| Assistant | Skill path generated |
 |---|---|
-| [Google Antigravity](https://antigravity.dev) | `.agents/skills/astrix/SKILL.md` |
-| [Cursor](https://cursor.sh) | `.cursor/rules/astrix.mdc` |
+| [Google Antigravity](https://antigravity.dev) / Gemini | `.agents/skills/astrix/SKILL.md` |
 | [Claude Code](https://claude.ai/code) | `.claude/skills/astrix/SKILL.md` |
-| [GitHub Copilot](https://github.com/features/copilot) | `.github/copilot-instructions.md` |
+| [Cursor](https://cursor.sh) | `.cursor/skills/astrix/SKILL.md` |
+| [GitHub Copilot](https://github.com/features/copilot) | `.github/skills/astrix/SKILL.md` |
+| [Windsurf (Cascade)](https://windsurf.com) | `.windsurf/skills/astrix/SKILL.md` |
+| [OpenAI Codex](https://github.com/openai/codex) | `.codex/skills/astrix/SKILL.md` |
+| [OpenCode](https://opencode.ai) | `.opencode/skills/astrix/SKILL.md` |
+| [Cline](https://cline.bot) | `.cline/skills/astrix/SKILL.md` |
+| [Roo Code](https://roocode.com) | `.roo/skills/astrix/SKILL.md` |
+| Generic (Single-file) | `ASTRIX.md` |
 
 ## 📦 Installation
 
