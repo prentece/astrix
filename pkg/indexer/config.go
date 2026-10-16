@@ -2,11 +2,24 @@ package indexer
 
 import (
 	"astrix/pkg/storage"
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
+
+// ExtractorVersion identifica a versão do algoritmo de extração de símbolos do engine.
+// Incrementar este valor invalida automaticamente o cache incremental de todos os arquivos.
+const ExtractorVersion = "v2"
+
+// QueryVersioner é uma interface opcional para configurações de linguagem que desejem
+// invalidar explicitamente o cache incremental além do hash das queries S-expression.
+type QueryVersioner interface {
+	QueryVersion() int
+}
 
 // TestPatternType define como reconhecer testes em uma linguagem.
 type TestPatternType string
@@ -100,4 +113,51 @@ func SupportedExtensions() []string {
 		exts = append(exts, ext)
 	}
 	return exts
+}
+
+// QuerySignature retorna uma assinatura curta (12 hex chars) que representa a versão do extrator
+// e o texto das queries Tree-sitter da linguagem. Qualquer mudança nas queries altera a assinatura.
+func QuerySignature(cfg LanguageConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte(ExtractorVersion))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(cfg.Name()))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(cfg.SymbolsQuery()))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(cfg.CallersQuery()))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(cfg.VariablesQuery()))
+	if qv, ok := cfg.(QueryVersioner); ok {
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(strconv.Itoa(qv.QueryVersion())))
+	}
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum[:6])
+}
+
+// CalculateContentHash combina o SHA-256 do conteúdo do arquivo com a QuerySignature da linguagem.
+func CalculateContentHash(content []byte, cfg LanguageConfig) string {
+	base := calculateHash(content)
+	sig := QuerySignature(cfg)
+	if sig == "" {
+		return base
+	}
+	return base + ":" + sig
+}
+
+// IsContentHashQueryStale informa se um ContentHash em cache foi gerado com uma versão de query/extrator
+// diferente da atual para a linguagem informada.
+func IsContentHashQueryStale(cachedHash string, cfg LanguageConfig) bool {
+	if cfg == nil || cachedHash == "" {
+		return false
+	}
+	if idx := strings.IndexByte(cachedHash, ':'); idx >= 0 {
+		return cachedHash[idx+1:] != QuerySignature(cfg)
+	}
+	// Hashes SHA-256 reais de versões anteriores do Astrix têm 64 caracteres hex sem sufixo ":sig".
+	return len(cachedHash) == 64
 }

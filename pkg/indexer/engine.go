@@ -318,7 +318,7 @@ func (e *Engine) indexProjectInternal(projectID string) error {
 						mtime = info.ModTime().Unix()
 						fileSize = info.Size()
 					}
-					cHash := calculateHash(content)
+					cHash := CalculateContentHash(content, job.file.Config)
 					dHash := calculateHash([]byte(parsed.Digest))
 					state = &storage.ProjectFileState{
 						ProjectID:   proj.ID,
@@ -635,7 +635,7 @@ func (e *Engine) ProcessIncrementalDelta(projectID string) (*storage.DeltaReport
 					continue
 				}
 
-				contentHash := calculateHash(content)
+				contentHash := CalculateContentHash(content, config)
 				oldState := cachedStates[job.relPath]
 
 				// Nível 1: content_hash check (sem alteração de conteúdo)
@@ -954,65 +954,26 @@ func (e *Engine) ExtractASTDataAndDigest(
 				break
 			}
 
-			var name string
+			var name, parentName string
 			var kind storage.SymbolKind
 			var defNode *sitter.Node
 
 			for _, cap := range match.Captures {
-				capName := symbolsQuery.CaptureNameForId(cap.Index)
-				nodeText := cap.Node.Content(content)
+				base, role, _ := strings.Cut(symbolsQuery.CaptureNameForId(cap.Index), ".")
+				capKind, known := SymbolCaptureKind(base)
+				if !known {
+					continue
+				}
 
-				switch capName {
-				case "function.name":
-					name = nodeText
-					kind = storage.KindFunction
-				case "function.def":
+				switch role {
+				case "name":
+					name = cap.Node.Content(content)
+					kind = capKind
+				case "def":
 					defNode = cap.Node
-				case "method.name":
-					name = nodeText
-					kind = storage.KindMethod
-				case "method.def":
-					defNode = cap.Node
-				case "struct.name":
-					name = nodeText
-					kind = storage.KindStruct
-				case "struct.def":
-					defNode = cap.Node
-				case "interface.name":
-					name = nodeText
-					kind = storage.KindInterface
-				case "interface.def":
-					defNode = cap.Node
-				case "class.name":
-					name = nodeText
-					kind = storage.KindClass
-				case "class.def":
-					defNode = cap.Node
-				case "type.name":
-					name = nodeText
-					kind = storage.KindType
-				case "type.def":
-					defNode = cap.Node
-				case "const.name":
-					name = nodeText
-					kind = storage.KindConstant
-				case "const.def":
-					defNode = cap.Node
-				case "var.name", "variable.name":
-					name = nodeText
-					kind = storage.KindVariable
-				case "var.def", "variable.def":
-					defNode = cap.Node
-				case "enum.name":
-					name = nodeText
-					kind = storage.KindEnum
-				case "enum.def":
-					defNode = cap.Node
-				case "import.name":
-					name = nodeText
-					kind = storage.KindImport
-				case "import.def":
-					defNode = cap.Node
+				case "parent":
+					// Container explícito quando ele não envolve o símbolo na AST (ex.: receiver de método Go).
+					parentName = cap.Node.Content(content)
 				}
 			}
 
@@ -1030,6 +991,7 @@ func (e *Engine) ExtractASTDataAndDigest(
 					Name:      name,
 					Kind:      kind,
 					Signature: signature,
+					Parent:    parentName,
 					Language:  config.Name(),
 					StartLine: int(startPos.Row) + 1, // 1-indexed
 					EndLine:   int(endPos.Row) + 1,   // 1-indexed
@@ -1039,13 +1001,16 @@ func (e *Engine) ExtractASTDataAndDigest(
 			}
 		}
 
-		// Deduplica símbolos pelo par (file, name), priorizando o bloco mais completo
-		symbols = deduplicateSymbols(symbols)
-
 		// Ajusta métodos de Python que pertencem a classes
 		if config.Name() == "python" {
 			linkPythonClassMethods(symbols)
 		}
+
+		// Preenche o container (parent) de cada símbolo pelo menor container que o envolve na AST
+		assignSymbolParents(symbols)
+
+		// Deduplica símbolos pela tripla (file, name, parent), priorizando o bloco mais completo
+		symbols = deduplicateSymbols(symbols)
 
 		result.Symbols = symbols
 	}
@@ -1119,33 +1084,124 @@ func (e *Engine) ExtractASTDataAndDigest(
 	return result, nil
 }
 
-// deduplicateSymbols remove duplicatas no mesmo arquivo mantendo a definição mais ampla.
+// symbolCaptureKinds mapeia o prefixo dos nomes de captura das SymbolsQuery (`<base>.name`,
+// `<base>.def`, `<base>.parent`) para o Kind do símbolo. Capturas fora desta tabela são ignoradas.
+var symbolCaptureKinds = map[string]storage.SymbolKind{
+	"function":    storage.KindFunction,
+	"method":      storage.KindMethod,
+	"constructor": storage.KindMethod,
+	"struct":      storage.KindStruct,
+	"interface":   storage.KindInterface,
+	"class":       storage.KindClass,
+	"record":      storage.KindClass,
+	"trait":       storage.KindTrait,
+	"type":        storage.KindType,
+	"const":       storage.KindConstant,
+	"var":         storage.KindVariable,
+	"variable":    storage.KindVariable,
+	"enum":        storage.KindEnum,
+	"field":       storage.KindField,
+	"namespace":   storage.KindNamespace,
+	"mod":         storage.KindNamespace,
+	"import":      storage.KindImport,
+}
+
+// SymbolCaptureKind devolve o Kind associado ao prefixo de uma captura de SymbolsQuery.
+func SymbolCaptureKind(base string) (storage.SymbolKind, bool) {
+	k, ok := symbolCaptureKinds[base]
+	return k, ok
+}
+
+// isContainerKind indica os kinds que podem ser "parent" de outros símbolos.
+func isContainerKind(k storage.SymbolKind) bool {
+	switch k {
+	case storage.KindClass, storage.KindStruct, storage.KindInterface,
+		storage.KindEnum, storage.KindTrait, storage.KindNamespace:
+		return true
+	}
+	return false
+}
+
+// symbolKindRank desempata símbolos de mesmo nome e mesmo bloco: o kind mais específico vence
+// (por exemplo, struct sobre type, function sobre const).
+func symbolKindRank(k storage.SymbolKind) int {
+	switch k {
+	case storage.KindClass, storage.KindStruct, storage.KindInterface, storage.KindEnum, storage.KindTrait:
+		return 6
+	case storage.KindNamespace:
+		return 5
+	case storage.KindFunction, storage.KindMethod:
+		return 4
+	case storage.KindType:
+		return 3
+	case storage.KindField:
+		return 2
+	case storage.KindConstant:
+		return 1
+	}
+	return 0
+}
+
+// assignSymbolParents preenche Symbol.Parent com o nome do menor container (classe, struct,
+// interface, enum, trait ou namespace) cujo bloco envolve estritamente o símbolo.
+// Símbolos que já têm Parent (receiver de Go, vínculo de Python) são preservados.
+func assignSymbolParents(symbols []*storage.Symbol) {
+	for _, s := range symbols {
+		if s.Parent != "" {
+			continue
+		}
+		var best *storage.Symbol
+		for _, c := range symbols {
+			if c == s || !isContainerKind(c.Kind) {
+				continue
+			}
+			if c.StartByte > s.StartByte || c.EndByte < s.EndByte {
+				continue
+			}
+			if c.StartByte == s.StartByte && c.EndByte == s.EndByte {
+				continue // mesmo bloco: é o próprio símbolo sob outro kind
+			}
+			if c.Name == s.Name && c.Kind == s.Kind {
+				continue // wrapper do mesmo símbolo (ex.: decorated_definition em Python)
+			}
+			if best == nil || (c.EndByte-c.StartByte) < (best.EndByte-best.StartByte) {
+				best = c
+			}
+		}
+		if best != nil {
+			s.Parent = best.Name
+		}
+	}
+}
+
+// deduplicateSymbols colapsa símbolos repetidos pela tripla (file, name, parent). Vence o bloco
+// mais completo; em empate de tamanho, o kind mais específico; em novo empate, o primeiro.
 func deduplicateSymbols(symbols []*storage.Symbol) []*storage.Symbol {
 	type key struct {
-		file string
-		name string
+		file   string
+		name   string
+		parent string
 	}
 
 	best := make(map[key]*storage.Symbol)
 	for _, sym := range symbols {
-		k := key{file: sym.File, name: sym.Name}
+		k := key{file: sym.File, name: sym.Name, parent: sym.Parent}
 		existing, ok := best[k]
 		if !ok {
 			best[k] = sym
 			continue
 		}
 
-		// Compara tamanho do byte range
 		currSize := sym.EndByte - sym.StartByte
 		prevSize := existing.EndByte - existing.StartByte
-		if currSize > prevSize {
+		if currSize > prevSize || (currSize == prevSize && symbolKindRank(sym.Kind) > symbolKindRank(existing.Kind)) {
 			best[k] = sym
 		}
 	}
 
 	result := make([]*storage.Symbol, 0, len(best))
 	for _, sym := range symbols {
-		k := key{file: sym.File, name: sym.Name}
+		k := key{file: sym.File, name: sym.Name, parent: sym.Parent}
 		if best[k] == sym {
 			result = append(result, sym)
 			delete(best, k) // evita duplicatas se houvesse múltiplos iguais
@@ -1155,34 +1211,27 @@ func deduplicateSymbols(symbols []*storage.Symbol) []*storage.Symbol {
 	return result
 }
 
-// linkPythonClassMethods associa métodos às classes pai no Python com base no range de bytes.
+// linkPythonClassMethods converte funções definidas dentro de uma classe em métodos, vinculando-as
+// à classe mais interna que as envolve.
 func linkPythonClassMethods(symbols []*storage.Symbol) {
-	type classRange struct {
-		name      string
-		startByte int
-		endByte   int
-	}
-
-	var classes []classRange
 	for _, s := range symbols {
-		if s.Kind == storage.KindClass {
-			classes = append(classes, classRange{
-				name:      s.Name,
-				startByte: s.StartByte,
-				endByte:   s.EndByte,
-			})
+		if s.Kind != storage.KindFunction || s.Parent != "" {
+			continue
 		}
-	}
-
-	for _, s := range symbols {
-		if s.Kind == storage.KindFunction && s.Parent == "" {
-			for _, cls := range classes {
-				if s.StartByte >= cls.startByte && s.EndByte <= cls.endByte {
-					s.Kind = storage.KindMethod
-					s.Parent = cls.name
-					break
+		var best *storage.Symbol
+		for _, c := range symbols {
+			if c.Kind != storage.KindClass || c == s {
+				continue
+			}
+			if s.StartByte >= c.StartByte && s.EndByte <= c.EndByte {
+				if best == nil || (c.EndByte-c.StartByte) < (best.EndByte-best.StartByte) {
+					best = c
 				}
 			}
+		}
+		if best != nil {
+			s.Kind = storage.KindMethod
+			s.Parent = best.Name
 		}
 	}
 }

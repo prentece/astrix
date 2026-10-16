@@ -15,11 +15,23 @@ const TypeScriptSymbolsQuery = `
 (function_declaration
   name: (identifier) @function.name) @function.def
 
+(function_signature
+  name: (identifier) @function.name) @function.def
+
 (class_declaration
+  name: (type_identifier) @class.name) @class.def
+
+(abstract_class_declaration
   name: (type_identifier) @class.name) @class.def
 
 (method_definition
   name: (property_identifier) @method.name) @method.def
+
+(abstract_method_signature
+  name: (property_identifier) @method.name) @method.def
+
+(public_field_definition
+  name: (property_identifier) @field.name) @field.def
 
 (lexical_declaration
   (variable_declarator
@@ -31,14 +43,46 @@ const TypeScriptSymbolsQuery = `
     name: (identifier) @function.name
     value: (function_expression))) @function.def
 
+(program
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @const.name
+      value: _) @const.def))
+
+(program
+  (export_statement
+    declaration: (lexical_declaration
+      (variable_declarator
+        name: (identifier) @const.name
+        value: _) @const.def)))
+
 (interface_declaration
   name: (type_identifier) @interface.name) @interface.def
+
+(method_signature
+  name: (property_identifier) @method.name) @method.def
+
+(property_signature
+  name: (property_identifier) @field.name) @field.def
 
 (type_alias_declaration
   name: (type_identifier) @type.name) @type.def
 
 (enum_declaration
   name: (identifier) @enum.name) @enum.def
+
+(enum_body
+  (property_identifier) @const.name @const.def)
+
+(enum_assignment
+  name: (property_identifier) @const.name) @const.def
+
+(internal_module
+  name: (identifier) @namespace.name) @namespace.def
+
+(module
+  name: (string
+    (string_fragment) @namespace.name)) @namespace.def
 ` // TypeScriptCallersQuery é a S-expression para detecção de chamadas em TypeScript.
 
 const TypeScriptCallersQuery = `
@@ -91,11 +135,6 @@ const TypeScriptVariablesQuery = `
 
 (for_in_statement
   left: (identifier) @var.name)
-
-(for_in_statement
-  left: (lexical_declaration
-    (variable_declarator
-      name: (identifier) @var.name))))
 
 (required_parameter
   pattern: (identifier) @var.name)
@@ -162,6 +201,12 @@ const JavaScriptSymbolsQuery = `
 (method_definition
   name: (property_identifier) @method.name) @method.def
 
+(field_definition
+  property: (property_identifier) @field.name) @field.def
+
+(field_definition
+  property: (private_property_identifier) @field.name) @field.def
+
 (lexical_declaration
   (variable_declarator
     name: (identifier) @const.name
@@ -171,6 +216,19 @@ const JavaScriptSymbolsQuery = `
   (variable_declarator
     name: (identifier) @function.name
     value: (function_expression))) @function.def
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @const.name
+      value: _) @const.def))
+
+(program
+  (export_statement
+    declaration: (lexical_declaration
+      (variable_declarator
+        name: (identifier) @const.name
+        value: _) @const.def)))
 
 (variable_declaration
   (variable_declarator

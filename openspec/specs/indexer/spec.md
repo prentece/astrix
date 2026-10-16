@@ -6,25 +6,31 @@ Coordinates the multi-language Abstract Syntax Tree (AST) parsing, symbol extrac
 ## Requirements
 
 ### Requirement: Polyglot Tree-sitter AST Parsing
-The Indexer Engine SHALL parse source code files across supported programming languages (Go, TypeScript/JavaScript, Python, Java, PHP) into concrete AST representations.
+The Indexer Engine SHALL parse source code files across supported programming languages (Go, TypeScript/JavaScript, Python, Java, PHP) into concrete AST representations, mapping capture roles (`<kind>.name`, `<kind>.def`, and optional `<kind>.parent`) to semantic `SymbolKind` values (`function`, `method`, `class`, `struct`, `interface`, `type`, `constant`, `variable`, `enum`, `trait`, `field`, `namespace`, `import`), linking nested members to their innermost enclosing container as `Parent`, and deduplicating symbols by `(file, name, parent)` while prioritizing more specific symbol kinds on identical byte spans.
 
 #### Scenario: Parsing a Go source file
-- **GIVEN** a Go file containing package declarations, functions, types, and methods
+- **GIVEN** a Go file containing package declarations, functions, types (structs, interfaces, type aliases, generic types), struct fields, interface method elements, constants, variables, and methods (including value, pointer, and generic receivers)
 - **WHEN** the file is parsed by the Go grammar extractor
-- **THEN** the engine SHALL extract functions, methods, structs, interfaces, signatures, line ranges, and visibility
+- **THEN** the engine SHALL extract functions, methods (with `Parent` set to the receiver type name), structs, interfaces, type aliases, struct fields (with `Parent` set to the enclosing struct), interface methods (with `Parent` set to the enclosing interface), constants, and variables
 
-#### Scenario: Parsing a TypeScript source file
-- **GIVEN** a TypeScript or JavaScript file containing classes, interfaces, and exported functions
-- **WHEN** the file is parsed by the TypeScript grammar extractor
-- **THEN** the engine SHALL extract class declarations, method signatures, interfaces, and export scopes
+#### Scenario: Parsing a TypeScript or JavaScript source file
+- **GIVEN** a TypeScript or JavaScript file containing classes (including abstract classes), fields (public, readonly, static, and `#private`), methods (including constructors and abstract methods), interfaces (with method and property signatures), enums (with members), namespaces/modules, ambient function signatures, and module-level `const` bindings
+- **WHEN** the file is parsed by the TypeScript or JavaScript grammar extractor
+- **THEN** the engine SHALL extract all declarations with their respective kinds and link class/interface/enum/namespace members to their enclosing `Parent` without indexing function-local variables as symbols
+
+#### Scenario: Parsing a Java, PHP, or Python source file
+- **GIVEN** a Java file (classes, interfaces, `@interface` annotations and elements, enums and enum constants, records, compact/standard constructors, methods, fields), a PHP file (namespaces, classes, interfaces, traits, enums and cases, functions, methods, constants, properties, constructor-promoted properties, trait `use`), or a Python file (functions, classes, decorated definitions, methods, module-level constants, and class attributes)
+- **WHEN** the file is parsed by the respective language extractor
+- **THEN** the engine SHALL map `@record` to `class`, `@constructor` to `method`, `@trait` to `trait`, `@field` to `field`, and `@mod`/`@namespace` to `namespace`
+- **AND** the engine SHALL link nested members to their innermost enclosing container (`Parent`) and exclude Python function-local variable assignments from symbol extraction
 
 ---
 
 ### Requirement: Incremental Delta Indexing via Hashing
-The Indexer Engine SHALL avoid reprocessing unchanged files by maintaining cryptographic SHA-256 hashes and file modification timestamps in `file_states`.
+The Indexer Engine SHALL avoid reprocessing unchanged files by maintaining cryptographic SHA-256 content hashes combined with a language query/extractor signature (`QuerySignature`) and file modification timestamps in `file_states`.
 
 #### Scenario: Reindexing an unchanged file
-- **GIVEN** a file whose SHA-256 hash matches the hash recorded in `file_states`
+- **GIVEN** a file whose `mtime`, `file_size`, content hash, and language `QuerySignature` match the entry recorded in `file_states`
 - **WHEN** incremental reindexing is triggered
 - **THEN** the engine SHALL skip Tree-sitter parsing for that file and retain existing symbols in the database
 
@@ -34,10 +40,16 @@ The Indexer Engine SHALL avoid reprocessing unchanged files by maintaining crypt
 - **THEN** the engine SHALL delete existing symbols for that file
 - **AND** the engine SHALL parse the updated content, extract new symbols, and update `file_states`
 
+#### Scenario: Invalidating cache when language queries or extractor version change
+- **GIVEN** a previously indexed file whose disk `mtime` and `file_size` are unchanged, but whose cached `ContentHash` has a stale or missing `QuerySignature` for its `LanguageConfig`
+- **WHEN** delta detection or incremental reindexing runs
+- **THEN** the file SHALL be marked as modified, re-parsed with the current Tree-sitter queries, and persisted with the updated `ContentHash`
+
 #### Scenario: Handling deleted files
 - **GIVEN** a file previously indexed that no longer exists on disk
 - **WHEN** reindexing runs
 - **THEN** the engine SHALL delete all associated symbols, dependencies, and file state entries for that file
+
 
 ---
 

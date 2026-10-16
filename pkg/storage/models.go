@@ -54,6 +54,8 @@ const (
 	KindTrait     SymbolKind = "trait"
 	KindImport    SymbolKind = "import"
 	KindTest      SymbolKind = "test"
+	KindField     SymbolKind = "field"
+	KindNamespace SymbolKind = "namespace"
 	KindOther     SymbolKind = "other"
 )
 
