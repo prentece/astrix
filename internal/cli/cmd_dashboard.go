@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
-	"time"
 )
 
 // RunDashboard exibe as informações do projeto e apresenta um menu interativo de ações.

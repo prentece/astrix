@@ -318,3 +318,90 @@ func TestProcessIncrementalDelta_SkipsCentralityWhenDigestUnchanged(t *testing.T
 	}
 }
 
+func TestQueryChangeInvalidatesIncrementalCache(t *testing.T) {
+	database, tmpDir := setupTestDB(t)
+	defer os.RemoveAll(tmpDir)
+	defer database.Close()
+
+	projectRepo := storage.NewProjectRepo(database)
+	symbolRepo := storage.NewSymbolRepo(database)
+	depRepo := storage.NewDependencyGraphRepo(database)
+	dataModelRepo := storage.NewDataModelRepo(database)
+	fileStateRepo := storage.NewSQLFileStateRepository(database.Conn())
+
+	engine := indexer.NewEngine(projectRepo, symbolRepo, depRepo, dataModelRepo)
+	engine.SetFileStateRepo(fileStateRepo)
+
+	projDir := filepath.Join(tmpDir, "repo_query_version")
+	_ = os.MkdirAll(projDir, 0o755)
+
+	code := "package main\n\ntype Alias = int\n\nfunc Run() {}\n"
+	filePath := filepath.Join(projDir, "alias.go")
+	_ = os.WriteFile(filePath, []byte(code), 0o644)
+
+	proj := &storage.Project{
+		ID:       "proj-qv",
+		Name:     "Query Version Test",
+		Path:     projDir,
+		Language: "go",
+		Status:   storage.StatusPending,
+	}
+	_ = projectRepo.Create(proj)
+
+	if err := engine.IndexProject(proj.ID); err != nil {
+		t.Fatalf("IndexProject falhou: %v", err)
+	}
+
+	goCfg, ok := indexer.GetConfigByName("go")
+	if !ok {
+		t.Fatalf("config go não encontrada")
+	}
+	sig := indexer.QuerySignature(goCfg)
+	if sig == "" {
+		t.Fatalf("QuerySignature vazia")
+	}
+
+	state, err := fileStateRepo.Get(proj.ID, "alias.go")
+	if err != nil || state == nil {
+		t.Fatalf("estado de alias.go ausente: %v", err)
+	}
+	expectedHash := indexer.CalculateContentHash([]byte(code), goCfg)
+	if state.ContentHash != expectedHash {
+		t.Fatalf("ContentHash esperado %q, obteve %q", expectedHash, state.ContentHash)
+	}
+
+	// Sem mudanças no disco nem na query: delta incremental não re-parseia
+	repUnchanged, err := engine.ProcessIncrementalDelta(proj.ID)
+	if err != nil {
+		t.Fatalf("ProcessIncrementalDelta inalterado falhou: %v", err)
+	}
+	if repUnchanged.FilesParsed != 0 {
+		t.Fatalf("Esperava 0 arquivos parseados quando query e arquivo estão inalterados, obteve %d", repUnchanged.FilesParsed)
+	}
+
+	// Simula cache gravado por uma versão anterior da query (mesmo mtime e tamanho no disco, mas assinatura antiga)
+	_ = symbolRepo.DeleteByFile(proj.ID, "alias.go")
+	state.ContentHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:oldquery0000"
+	if !indexer.IsContentHashQueryStale(state.ContentHash, goCfg) {
+		t.Fatalf("Esperava que hash com assinatura antiga fosse considerado obsoleto")
+	}
+	if err := fileStateRepo.Upsert(state); err != nil {
+		t.Fatalf("Upsert falhou: %v", err)
+	}
+
+	// Agora ProcessIncrementalDelta deve invalidar o cache de alias.go e reextrair os símbolos
+	repStale, err := engine.ProcessIncrementalDelta(proj.ID)
+	if err != nil {
+		t.Fatalf("ProcessIncrementalDelta após mudança de query falhou: %v", err)
+	}
+	if repStale.FilesParsed != 1 {
+		t.Fatalf("Esperava 1 arquivo re-parseado por invalidação de query, obteve %d", repStale.FilesParsed)
+	}
+
+	syms, _, err := symbolRepo.FindSymbol(proj.ID, "Alias", 10, 0)
+	if err != nil || len(syms) != 1 {
+		t.Fatalf("Esperava símbolo Alias reindexado após invalidação de cache, obteve %d (err=%v)", len(syms), err)
+	}
+}
+
+

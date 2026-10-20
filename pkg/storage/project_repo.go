@@ -85,6 +85,9 @@ func (r *ProjectRepo) ListAll() ([]*Project, error) {
 		}
 		projects = append(projects, &p)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return projects, nil
 }
 

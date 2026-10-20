@@ -15,6 +15,11 @@ const (
 	AgentClaude      AgentType = "claude"
 	AgentCursor      AgentType = "cursor"
 	AgentCopilot     AgentType = "copilot"
+	AgentWindsurf    AgentType = "windsurf"
+	AgentCodex       AgentType = "codex"
+	AgentOpenCode    AgentType = "opencode"
+	AgentCline       AgentType = "cline"
+	AgentRoo         AgentType = "roo"
 	AgentGeneric     AgentType = "generic"
 	AgentGemini      AgentType = "antigravity" // alias para Antigravity
 )
@@ -45,14 +50,44 @@ func GetAvailableAgents() []AgentTarget {
 		{
 			ID:          "cursor",
 			Name:        "Cursor",
-			Description: "Gera .cursor/rules/astrix.mdc",
-			FilePath:    filepath.Join(".cursor", "rules", "astrix.mdc"),
+			Description: "Gera .cursor/skills/astrix/SKILL.md",
+			FilePath:    filepath.Join(".cursor", "skills", "astrix", "SKILL.md"),
 		},
 		{
 			ID:          "copilot",
-			Name:        "VS Code Copilot",
-			Description: "Gera .github/copilot-instructions.md",
-			FilePath:    filepath.Join(".github", "copilot-instructions.md"),
+			Name:        "GitHub Copilot",
+			Description: "Gera .github/skills/astrix/SKILL.md",
+			FilePath:    filepath.Join(".github", "skills", "astrix", "SKILL.md"),
+		},
+		{
+			ID:          "windsurf",
+			Name:        "Windsurf (Cascade)",
+			Description: "Gera .windsurf/skills/astrix/SKILL.md",
+			FilePath:    filepath.Join(".windsurf", "skills", "astrix", "SKILL.md"),
+		},
+		{
+			ID:          "codex",
+			Name:        "OpenAI Codex",
+			Description: "Gera .codex/skills/astrix/SKILL.md",
+			FilePath:    filepath.Join(".codex", "skills", "astrix", "SKILL.md"),
+		},
+		{
+			ID:          "opencode",
+			Name:        "OpenCode",
+			Description: "Gera .opencode/skills/astrix/SKILL.md",
+			FilePath:    filepath.Join(".opencode", "skills", "astrix", "SKILL.md"),
+		},
+		{
+			ID:          "cline",
+			Name:        "Cline",
+			Description: "Gera .cline/skills/astrix/SKILL.md",
+			FilePath:    filepath.Join(".cline", "skills", "astrix", "SKILL.md"),
+		},
+		{
+			ID:          "roo",
+			Name:        "Roo Code",
+			Description: "Gera .roo/skills/astrix/SKILL.md",
+			FilePath:    filepath.Join(".roo", "skills", "astrix", "SKILL.md"),
 		},
 		{
 			ID:          "generic",
@@ -123,13 +158,17 @@ func RemoveSkills(rootDir string) ([]string, error) {
 			if err := os.Remove(targetPath); err == nil {
 				removed = append(removed, target.FilePath)
 			}
-			// Se for um diretório de skill (ex: .agents/skills/astrix), tenta remover a pasta
+			// Se for um diretório de skill (ex: .agents/skills/astrix), tenta remover as pastas vazias
 			parentDir := filepath.Dir(targetPath)
 			if parentDir != rootDir {
-				_ = os.Remove(parentDir)
+				removeIfEmpty(parentDir)
 				skillsDir := filepath.Dir(parentDir)
 				if skillsDir != rootDir && strings.HasSuffix(parentDir, "astrix") {
-					_ = os.Remove(skillsDir)
+					removeIfEmpty(skillsDir)
+					dotDir := filepath.Dir(skillsDir)
+					if dotDir != rootDir {
+						removeIfEmpty(dotDir)
+					}
 				}
 			}
 		}
@@ -139,6 +178,7 @@ func RemoveSkills(rootDir string) ([]string, error) {
 	legacyFiles := []string{
 		filepath.Join(rootDir, ".agents", "rules", "astrix-skill.md"),
 		filepath.Join(rootDir, ".claude", "astrix.json"),
+		filepath.Join(rootDir, ".cursor", "rules", "astrix.mdc"),
 	}
 	for _, lf := range legacyFiles {
 		if _, err := os.Stat(lf); err == nil {
@@ -146,15 +186,12 @@ func RemoveSkills(rootDir string) ([]string, error) {
 		}
 	}
 
-	// Limpa pastas vazias remanescentes
-	removeIfEmpty(filepath.Join(rootDir, ".agents", "skills"))
+	// Limpa pastas legadas vazias remanescentes
 	removeIfEmpty(filepath.Join(rootDir, ".agents", "rules"))
 	removeIfEmpty(filepath.Join(rootDir, ".agents"))
 	removeIfEmpty(filepath.Join(rootDir, ".cursor", "rules"))
 	removeIfEmpty(filepath.Join(rootDir, ".cursor"))
-	removeIfEmpty(filepath.Join(rootDir, ".claude", "skills"))
 	removeIfEmpty(filepath.Join(rootDir, ".claude"))
-	removeIfEmpty(filepath.Join(rootDir, ".github"))
 
 	return removed, nil
 }

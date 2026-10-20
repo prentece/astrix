@@ -15,6 +15,14 @@ const GoSymbolsQuery = `
   name: (identifier) @function.name) @function.def
 
 (method_declaration
+  receiver: (parameter_list
+    (parameter_declaration
+      type: [
+        (type_identifier) @method.parent
+        (pointer_type (type_identifier) @method.parent)
+        (generic_type type: (type_identifier) @method.parent)
+        (pointer_type (generic_type type: (type_identifier) @method.parent))
+      ]))
   name: (field_identifier) @method.name) @method.def
 
 (type_declaration
@@ -31,6 +39,19 @@ const GoSymbolsQuery = `
   (type_spec
     name: (type_identifier) @type.name)) @type.def
 
+(type_declaration
+  (type_alias
+    name: (type_identifier) @type.name)) @type.def
+
+(struct_type
+  (field_declaration_list
+    (field_declaration
+      name: (field_identifier) @field.name) @field.def))
+
+(interface_type
+  (method_elem
+    name: (field_identifier) @method.name) @method.def)
+
 (const_declaration
   (const_spec
     name: (identifier) @const.name)) @const.def
@@ -38,6 +59,11 @@ const GoSymbolsQuery = `
 (var_declaration
   (var_spec
     name: (identifier) @var.name)) @var.def
+
+(var_declaration
+  (var_spec_list
+    (var_spec
+      name: (identifier) @var.name))) @var.def
 `
 
 // GoCallersQuery é a S-expression para detecção de chamadas de funções/métodos em Go.

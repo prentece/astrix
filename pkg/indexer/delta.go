@@ -82,7 +82,8 @@ func (d *DeltaEngine) DetectDeltaForFiles(projectID, projectPath string, candida
 		}
 
 		// Checa se o arquivo é suportado pelas linguagens cadastradas
-		if _, ok := GetConfigByFilePath(relPath); !ok {
+		cfg, ok := GetConfigByFilePath(relPath)
+		if !ok {
 			continue
 		}
 
@@ -91,13 +92,13 @@ func (d *DeltaEngine) DetectDeltaForFiles(projectID, projectPath string, candida
 
 		if !exists {
 			result.AddedFiles = append(result.AddedFiles, relPath)
-		} else if state.MTime != mtime || state.FileSize != size {
+		} else if state.MTime != mtime || state.FileSize != size || IsContentHashQueryStale(state.ContentHash, cfg) {
 			result.ModifiedFiles = append(result.ModifiedFiles, relPath)
 		} else {
 			// Se o stat for idêntico mas o arquivo foi notificado como candidato pelo watcher,
 			// verifica o hash do conteúdo para detectar edições in-place no mesmo segundo com mesmo tamanho.
 			content, err := os.ReadFile(absPath)
-			if err == nil && calculateHash(content) != state.ContentHash {
+			if err == nil && CalculateContentHash(content, cfg) != state.ContentHash && calculateHash(content) != state.ContentHash {
 				result.ModifiedFiles = append(result.ModifiedFiles, relPath)
 			} else {
 				result.UnchangedCount++
@@ -143,13 +144,13 @@ func (d *DeltaEngine) detectViaStatCache(projectPath string, cachedStates map[st
 		mtime := info.ModTime().Unix()
 		size := info.Size()
 
-		// Se mtime e size são idênticos, pula sem ler bytes do disco
-		if state.MTime == mtime && state.FileSize == size {
+		// Se mtime, size e assinatura de query são idênticos, pula sem ler bytes do disco
+		if state.MTime == mtime && state.FileSize == size && !IsContentHashQueryStale(state.ContentHash, f.Config) {
 			result.UnchangedCount++
 			continue
 		}
 
-		// Arquivo modificado no disco
+		// Arquivo modificado no disco ou com assinatura de query obsoleta
 		result.ModifiedFiles = append(result.ModifiedFiles, f.RelPath)
 	}
 

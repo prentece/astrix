@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -68,18 +68,28 @@ if (process.platform !== 'win32') {
   }
 }
 
-const result = spawnSync(binaryPath, process.argv.slice(2), {
+// O Ctrl+C é entregue a todo o process group (wrapper + binário). Se o wrapper
+// morrer, o shell retoma o terminal e o binário Go passa a ser background,
+// quebrando o modo raw (EIO). Por isso o wrapper ignora os sinais de
+// interrupção e deixa o binário tratá-los.
+process.on('SIGINT', () => {});
+process.on('SIGTERM', () => {});
+
+const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: 'inherit',
   env: process.env,
 });
 
-if (result.error) {
-  console.error(`[astrix] Falha ao executar o binário:`, result.error);
+child.on('error', (err) => {
+  console.error(`[astrix] Falha ao executar o binário:`, err);
   process.exit(1);
-}
+});
 
-if (result.signal) {
-  process.kill(process.pid, result.signal);
-} else {
-  process.exit(result.status !== null ? result.status : 0);
-}
+child.on('exit', (code, signal) => {
+  if (signal) {
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
+  } else {
+    process.exit(code !== null ? code : 0);
+  }
+});

@@ -300,7 +300,7 @@ func (r *DependencyGraphRepo) queryEdges(query string, args ...any) ([]*Dependen
 		edges = append(edges, &edge)
 	}
 
-	if err := rows.Err(); err != nil && err != sql.ErrNoRows {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 

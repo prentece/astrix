@@ -26,6 +26,16 @@ type Project struct {
 	CreatedAt    time.Time     `json:"created_at"`
 	UpdatedAt    time.Time     `json:"updated_at"`
 	IndexedAt    *time.Time    `json:"indexed_at,omitempty"`
+
+	// Languages é a distribuição por linguagem (em bytes dos arquivos indexados).
+	// Campo derivado: calculado na leitura a partir de project_file_states, nunca persistido.
+	Languages []LanguageShare `json:"languages,omitempty"`
+}
+
+// LanguageShare representa a participação de uma linguagem no projeto, em porcentagem (1 casa decimal).
+type LanguageShare struct {
+	Name    string  `json:"name"`
+	Percent float64 `json:"percent"`
 }
 
 // SymbolKind define a categoria semântica do símbolo extraído via AST.
@@ -44,6 +54,8 @@ const (
 	KindTrait     SymbolKind = "trait"
 	KindImport    SymbolKind = "import"
 	KindTest      SymbolKind = "test"
+	KindField     SymbolKind = "field"
+	KindNamespace SymbolKind = "namespace"
 	KindOther     SymbolKind = "other"
 )
 

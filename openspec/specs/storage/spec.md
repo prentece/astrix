@@ -91,3 +91,19 @@ The Storage layer SHALL recover projects that remained in the `indexing` status 
 - **GIVEN** a project was left in `status = 'indexing'` when the process was killed
 - **WHEN** Astrix initializes via `Execute()` and calls `ResetDanglingIndexingStatus()`
 - **THEN** the project status SHALL be automatically reset to `ready` with an informative error message explaining that the previous indexing was interrupted
+
+---
+
+### Requirement: Row Iteration Error Propagation
+Every iteration over `sql.Rows` in the Storage layer SHALL check `rows.Err()` after the `rows.Next()` loop and return the error to the caller instead of returning a partial result.
+
+#### Scenario: Iteration fails mid-result
+- **GIVEN** a query whose iteration yields valid rows and then fails (for example an I/O or corruption error raised by SQLite while stepping)
+- **WHEN** a repository list or lookup method consumes the rows
+- **THEN** the method SHALL return a non-nil error
+- **AND** it SHALL NOT return the partially collected result as a success
+
+#### Scenario: Lint enforcement
+- **GIVEN** the `rowserrcheck` linter is enabled in `.golangci.yml`
+- **WHEN** `make lint` runs
+- **THEN** a missing `rows.Err()` check detected by the linter SHALL fail the lint run

@@ -17,17 +17,33 @@ const JavaSymbolsQuery = `
 (interface_declaration
   name: (identifier) @interface.name) @interface.def
 
+(annotation_type_declaration
+  name: (identifier) @interface.name) @interface.def
+
+(annotation_type_element_declaration
+  name: (identifier) @method.name) @method.def
+
 (enum_declaration
   name: (identifier) @enum.name) @enum.def
 
+(enum_constant
+  name: (identifier) @const.name) @const.def
+
 (record_declaration
   name: (identifier) @record.name) @record.def
+
+(compact_constructor_declaration
+  name: (identifier) @constructor.name) @constructor.def
 
 (method_declaration
   name: (identifier) @method.name) @method.def
 
 (constructor_declaration
   name: (identifier) @constructor.name) @constructor.def
+
+(field_declaration
+  declarator: (variable_declarator
+    name: (identifier) @field.name)) @field.def
 `
 
 // JavaCallersQuery é a S-expression para detecção de chamadas em Java.

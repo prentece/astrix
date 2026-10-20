@@ -25,9 +25,16 @@ const PythonSymbolsQuery = `
   definition: (class_definition
     name: (identifier) @class.name)) @class.def
 
-(expression_statement
-  (assignment
-    left: (identifier) @const.name)) @const.def
+(module
+  (expression_statement
+    (assignment
+      left: (identifier) @const.name) @const.def))
+
+(class_definition
+  body: (block
+    (expression_statement
+      (assignment
+        left: (identifier) @const.name) @const.def)))
 
 (import_from_statement
   name: (dotted_name) @import.name) @import.def

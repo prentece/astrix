@@ -67,6 +67,9 @@ func (r *SQLFileStateRepository) ListByProject(projectID string) (map[string]*Pr
 		}
 		results[s.FilePath] = &s
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return results, nil
 }

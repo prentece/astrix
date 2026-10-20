@@ -149,6 +149,22 @@ func TestIndexer_LanguageDetection_SingleSourceOfTruth(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "php", cfgPhp.Name())
 
+	cfgRust, ok := indexer.GetConfigByFilePath("lib.rs")
+	require.True(t, ok)
+	assert.Equal(t, "rust", cfgRust.Name())
+
+	cfgCS, ok := indexer.GetConfigByFilePath("Program.cs")
+	require.True(t, ok)
+	assert.Equal(t, "csharp", cfgCS.Name())
+
+	cfgKt, ok := indexer.GetConfigByFilePath("Main.kt")
+	require.True(t, ok)
+	assert.Equal(t, "kotlin", cfgKt.Name())
+
+	cfgRb, ok := indexer.GetConfigByFilePath("app.rb")
+	require.True(t, ok)
+	assert.Equal(t, "ruby", cfgRb.Name())
+
 	// 2. Extensão desconhecida para AST retorna false no registry
 	_, ok = indexer.GetConfigByFilePath("data.unknown")
 	assert.False(t, ok)

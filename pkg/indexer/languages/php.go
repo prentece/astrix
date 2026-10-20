@@ -24,7 +24,7 @@ const PhpSymbolsQuery = `
   name: (name) @interface.name) @interface.def
 
 (trait_declaration
-  name: (name) @class.name) @class.def
+  name: (name) @trait.name) @trait.def
 
 (enum_declaration
   name: (name) @enum.name) @enum.def
@@ -35,6 +35,22 @@ const PhpSymbolsQuery = `
 (const_declaration
   (const_element
     (name) @const.name) @const.def)
+
+(property_declaration
+  (property_element
+    (variable_name
+      (name) @field.name)) @field.def)
+
+(property_promotion_parameter
+  name: (variable_name
+    (name) @field.name)) @field.def
+
+(use_declaration
+  (name) @import.name) @import.def
+
+(use_declaration
+  (qualified_name
+    (name) @import.name)) @import.def
 
 (namespace_definition
   name: (namespace_name) @mod.name) @mod.def

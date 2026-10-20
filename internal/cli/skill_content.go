@@ -118,12 +118,9 @@ list_projects {}                    -> use when the project is not the current o
 // .astrix/config.json or the list_projects tool.
 func BuildSkillContent(agentID string) string {
 	var sb strings.Builder
-	switch agentID {
-	case "antigravity", "claude":
+	if HasReferenceFile(agentID) {
 		sb.WriteString("---\nname: astrix\n")
 		sb.WriteString("description: Navigate and inspect code across indexed projects using Astrix MCP (AST-based symbol lookup, implementations, grep, structured file queries). Use when exploring, debugging or refactoring code.\n---\n\n")
-	case "cursor":
-		sb.WriteString("---\ndescription: Code navigation guidelines using the Astrix MCP\nglobs: *\nalwaysApply: true\n---\n\n")
 	}
 	sb.WriteString(md(skillBody))
 	if !HasReferenceFile(agentID) {
@@ -139,5 +136,5 @@ func BuildReferenceContent() string { return md(referenceBody) }
 
 // HasReferenceFile reports whether the agent uses a skill folder with a references/ directory.
 func HasReferenceFile(agentID string) bool {
-	return agentID == "antigravity" || agentID == "claude"
+	return agentID != "" && agentID != string(AgentGeneric)
 }

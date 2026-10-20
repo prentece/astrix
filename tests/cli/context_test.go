@@ -45,11 +45,11 @@ func TestCLI_ContextDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.FileExists(t, filepath.Join(tempDir, ".agents", "skills", "astrix", "SKILL.md"))
-	assert.FileExists(t, filepath.Join(tempDir, ".cursor", "rules", "astrix.mdc"))
+	assert.FileExists(t, filepath.Join(tempDir, ".cursor", "skills", "astrix", "SKILL.md"))
 
 	// 5. Limpeza de Skills e Config
 	_, _ = cli.RemoveSkills(tempDir)
-	assert.NoFileExists(t, filepath.Join(tempDir, ".cursor", "rules", "astrix.mdc"))
+	assert.NoFileExists(t, filepath.Join(tempDir, ".cursor", "skills", "astrix", "SKILL.md"))
 	assert.NoFileExists(t, filepath.Join(tempDir, ".agents", "skills", "astrix", "SKILL.md"))
 
 	err = cli.RemoveProjectConfig(tempDir)

@@ -268,14 +268,51 @@ func ToCleanJSON(v any) string {
 }
 
 // LeanProject representa a projeção ultra-enxuta de um projeto registrado.
+// `language` é mantido por compatibilidade (deprecated) com o valor de `primary_language`.
 type LeanProject struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Language    string `json:"language"`
-	Status      string `json:"status"`
-	FileCount   int    `json:"file_count"`
-	SymbolCount int    `json:"symbol_count"`
-	Path        string `json:"path"`
+	ID              string                  `json:"id"`
+	Name            string                  `json:"name"`
+	Language        string                  `json:"language"`
+	PrimaryLanguage string                  `json:"primary_language"`
+	Languages       []storage.LanguageShare `json:"languages,omitempty"`
+	Status          string                  `json:"status"`
+	FileCount       int                     `json:"file_count"`
+	SymbolCount     int                     `json:"symbol_count"`
+	Path            string                  `json:"path"`
+}
+
+// primaryLanguage devolve a linguagem predominante do projeto, com fallback para Project.Language
+// quando não há distribuição (por exemplo, projeto ainda não indexado).
+func primaryLanguage(p *storage.Project) string {
+	if len(p.Languages) > 0 {
+		return p.Languages[0].Name
+	}
+	return p.Language
+}
+
+// formatLanguageShares resume a distribuição para a tabela: top 3 linguagens mais "other",
+// por exemplo "go 84.0%, python 10.0%, java 6.0%". Sem distribuição, devolve Project.Language.
+func formatLanguageShares(p *storage.Project) string {
+	const topN = 3
+	if len(p.Languages) == 0 {
+		return p.Language
+	}
+
+	parts := make([]string, 0, topN+1)
+	for i, l := range p.Languages {
+		if i == topN {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %.1f%%", l.Name, l.Percent))
+	}
+	if len(p.Languages) > topN {
+		var other float64
+		for _, l := range p.Languages[topN:] {
+			other += l.Percent
+		}
+		parts = append(parts, fmt.Sprintf("other %.1f%%", other))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // FormatProjects formata a lista de projetos em formato tabular alinhado ou JSON enxuto.
@@ -287,14 +324,17 @@ func FormatProjects(projects []*storage.Project, asJSON bool) string {
 	if asJSON {
 		lean := make([]LeanProject, 0, len(projects))
 		for _, p := range projects {
+			primary := primaryLanguage(p)
 			lean = append(lean, LeanProject{
-				ID:          p.ID,
-				Name:        p.Name,
-				Language:    p.Language,
-				Status:      string(p.Status),
-				FileCount:   p.FileCount,
-				SymbolCount: p.SymbolCount,
-				Path:        p.Path,
+				ID:              p.ID,
+				Name:            p.Name,
+				Language:        primary,
+				PrimaryLanguage: primary,
+				Languages:       p.Languages,
+				Status:          string(p.Status),
+				FileCount:       p.FileCount,
+				SymbolCount:     p.SymbolCount,
+				Path:            p.Path,
 			})
 		}
 		return ToCleanJSON(lean)
@@ -321,7 +361,7 @@ func FormatProjects(projects []*storage.Project, asJSON bool) string {
 		rows[i] = row{
 			id:      p.ID,
 			name:    p.Name,
-			lang:    p.Language,
+			lang:    formatLanguageShares(p),
 			status:  string(p.Status),
 			files:   filesStr,
 			symbols: symbolsStr,
@@ -330,8 +370,8 @@ func FormatProjects(projects []*storage.Project, asJSON bool) string {
 		if len(p.Name) > maxNameLen {
 			maxNameLen = len(p.Name)
 		}
-		if len(p.Language) > maxLangLen {
-			maxLangLen = len(p.Language)
+		if len(rows[i].lang) > maxLangLen {
+			maxLangLen = len(rows[i].lang)
 		}
 		if len(p.Status) > maxStatusLen {
 			maxStatusLen = len(p.Status)
